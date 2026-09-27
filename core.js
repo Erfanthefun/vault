@@ -1,228 +1,370 @@
-/* هسته‌ی Vault: دارایی‌ها، قیمت‌ها، دفتر عملیات، بهای تمام‌شده و تحلیل‌ها (منطق خالص و قابل تست) */
+/* هسته‌ی منطقی اپ: تقویم شمسی، قالب‌بندی، پارسر پیامک، محاسبه‌ی تعهدات */
 (function (root) {
   'use strict';
-  const J = root.J;
 
-  // هر دارایی به کوچک‌ترین واحدش ذخیره می‌شه (عدد صحیح) تا خطای اعشاری جمع نشه
-  const ASSETS = {
-    irr:  { name: 'ریال', unit: 'تومان', base: 10, dec: 0 },          // ذخیره به ریال، نمایش به تومان
-    gold: { name: 'طلای آنلاین', unit: 'گرم', base: 1000, dec: 3 },   // میلی‌گرم
-    bar:  { name: 'شمش طلا', unit: 'گرم', base: 1000, dec: 3 },       // میلی‌گرم
-    usdt: { name: 'تتر', unit: 'USDT', fa: 'تتر', base: 1e6, dec: 2 },           // میکروتتر
-    btc:  { name: 'بیت‌کوین', unit: 'BTC', fa: 'بیت‌کوین', base: 1e8, dec: 8 }         // ساتوشی
-  };
-  const ORDER = ['gold', 'bar', 'usdt', 'btc', 'irr'];
+  // ---------- تقویم شمسی (الگوریتم jalaali) ----------
+  const div = (a, b) => ~~(a / b);
+  const mod = (a, b) => a - ~~(a / b) * b;
+  const BREAKS = [-61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210, 1635, 2060, 2097, 2192, 2262, 2324, 2394, 2456, 3178];
 
-  // تبدیل متن ورودی به واحد پایه، بدون ضرب اعشاری (با رشته)
-  function parseQty(text, asset) {
-    const a = ASSETS[asset];
-    const s = J.normDigits(text).replace(/٫/g, '.').replace(/[,\s٬]/g, '').trim();
-    if (!/^\d*\.?\d*$/.test(s) || s === '' || s === '.') return null;
-    const [i, f = ''] = s.split('.');
-    const decs = Math.round(Math.log10(a.base));
-    const frac = (f + '0'.repeat(decs)).slice(0, decs);
-    const n = Number((i || '0') + frac);
-    return Number.isSafeInteger(n) ? n : null;
-  }
-  // نمایش مقدار با حذف صفرهای انتهایی
-  function fmtQty(q, asset, maxDec) {
-    const a = ASSETS[asset];
-    if (asset === 'irr') return J.faNum(q / 10);
-    const decs = Math.round(Math.log10(a.base)), neg = q < 0, abs = Math.abs(q);
-    const i = Math.floor(abs / a.base), f = String(abs % a.base).padStart(decs, '0').slice(0, maxDec ?? a.dec).replace(/0+$/, '');
-    return (neg ? '-' : '') + J.faNum(i) + (f ? '٫' + J.faDigits(f) : '');
-  }
-
-  // ---------- قیمت‌ها ----------
-  // هر نمونه: { date, gold: ریال برای هر گرم ۱۸ عیار، usdt: ریال برای هر تتر، btc: تتر برای هر بیت‌کوین }
-  const sortedPrices = state => state.prices.slice().sort((a, b) => a.date.localeCompare(b.date));
-  function latestPrice(state) { const p = sortedPrices(state); return p.length ? p[p.length - 1] : null; }
-  // قیمت در یک تاریخ: آخرین نمونه تا اون روز؛ اگه نبود، اولین نمونه‌ی بعدش
-  function priceAt(state, date) {
-    const p = sortedPrices(state); if (!p.length) return null;
-    let best = null; for (const x of p) { if (x.date <= date) best = x; else break; }
-    return best || p[0];
-  }
-  // ارزش ریالی یک واحد پایه از هر دارایی
-  function unitRial(asset, P, settings) {
-    if (asset === 'irr') return 1;
-    if (!P) return null;
-    const adj = 1 + ((settings && settings.barAdj) || 0) / 100;
-    switch (asset) {
-      case 'gold': return P.gold / 1000;
-      case 'bar': return P.gold / 1000 * adj;
-      case 'usdt': return P.usdt / 1e6;
-      case 'btc': return P.btc * P.usdt / 1e8;
+  function jalCal(jy, withoutLeap) {
+    const bl = BREAKS.length, gy = jy + 621;
+    let leapJ = -14, jp = BREAKS[0], jm, jump = 0, leap, n, i;
+    for (i = 1; i < bl; i++) {
+      jm = BREAKS[i]; jump = jm - jp;
+      if (jy < jm) break;
+      leapJ = leapJ + div(jump, 33) * 8 + div(mod(jump, 33), 4);
+      jp = jm;
     }
-    return null;
+    n = jy - jp;
+    leapJ = leapJ + div(n, 33) * 8 + div(mod(n, 33) + 3, 4);
+    if (mod(jump, 33) === 4 && jump - n === 4) leapJ += 1;
+    const leapG = div(gy, 4) - div((div(gy, 100) + 1) * 3, 4) - 150;
+    const march = 20 + leapJ - leapG;
+    if (withoutLeap) return { gy, march };
+    if (jump - n < 6) n = n - jump + div(jump + 4, 33) * 33;
+    leap = mod(mod(n + 1, 33) - 1, 4);
+    if (leap === -1) leap = 4;
+    return { leap, gy, march };
   }
-  const valueRial = (asset, q, P, settings) => { const u = unitRial(asset, P, settings); return u === null ? null : q * u; };
+  function g2d(gy, gm, gd) {
+    let d = div((gy + div(gm - 8, 6) + 100100) * 1461, 4) + div(153 * mod(gm + 9, 12) + 2, 5) + gd - 34840408;
+    return d - div(div(gy + 100100 + div(gm - 8, 6), 100) * 3, 4) + 752;
+  }
+  function d2g(jdn) {
+    let j = 4 * jdn + 139361631;
+    j = j + div(div(4 * jdn + 183187720, 146097) * 3, 4) * 4 - 3908;
+    const i = div(mod(j, 1461), 4) * 5 + 308;
+    const gd = div(mod(i, 153), 5) + 1;
+    const gm = mod(div(i, 153), 12) + 1;
+    const gy = div(j, 1461) - 100100 + div(8 - gm, 6);
+    return { gy, gm, gd };
+  }
+  function j2d(jy, jm, jd) {
+    const r = jalCal(jy, true);
+    return g2d(r.gy, 3, r.march) + (jm - 1) * 31 - div(jm, 7) * (jm - 7) + jd - 1;
+  }
+  function d2j(jdn) {
+    const gy = d2g(jdn).gy;
+    let jy = gy - 621;
+    const r = jalCal(jy, false);
+    let k = jdn - g2d(gy, 3, r.march), jm, jd;
+    if (k >= 0) {
+      if (k <= 185) { jm = 1 + div(k, 31); jd = mod(k, 31) + 1; return { jy, jm, jd }; }
+      k -= 186;
+    } else { jy -= 1; k += 179; if (r.leap === 1) k += 1; }
+    jm = 7 + div(k, 30); jd = mod(k, 30) + 1;
+    return { jy, jm, jd };
+  }
+  const isLeapJ = jy => jalCal(jy, false).leap === 0;
+  const monthLen = (jy, jm) => jm <= 6 ? 31 : jm <= 11 ? 30 : (isLeapJ(jy) ? 30 : 29);
 
-  // ---------- دفتر عملیات ----------
-  // عملیات: { id, date, type, loc, loc2?, out?: {a, q, pieces?}, in?: {a, q, pieces?}, cost?, proceeds?, note, created }
-  //  cost: وقتی دارایی از بیرون وارد می‌شه (موجودی اولیه، واریز، خرید از حساب بانکی) — بهای تمام‌شده به ریال
-  //  proceeds: وقتی دارایی فروخته و پولش به بیرون (حساب بانکی) می‌ره — مبلغ دریافتی به ریال
-  const opSort = (a, b) => a.date.localeCompare(b.date) || (a.created || 0) - (b.created || 0);
+  const pad = n => String(n).padStart(2, '0');
+  const jStr = (y, m, d) => `${y}/${pad(m)}/${pad(d)}`;
+  const jParse = s => { const [y, m, d] = s.split('/').map(Number); return { y, m, d }; };
 
-  function replay(state, uptoDate, extraOp) {
-    const ops = state.ops.concat(extraOp ? [extraOp] : []).filter(o => !uptoDate || o.date <= uptoDate).sort(opSort);
-    const H = {}, pieces = {}, basis = {}, realized = { r: 0, u: 0, byAsset: {} }, flows = [], errors = [], idle = {};
-    ORDER.forEach(a => { basis[a] = { q: 0, r: 0, u: 0 }; realized.byAsset[a] = 0; });
-    const usdtAt = d => { const P = priceAt(state, d); return P ? P.usdt : null; };
-    const hold = (loc, a) => ((H[loc] = H[loc] || {})[a] = (H[loc][a] || 0));
-    for (const o of ops) {
-      const u = usdtAt(o.date);
-      let removed = { r: 0, u: 0 };
-      if (o.out) {
-        const { a, q } = o.out;
-        hold(o.loc, a); H[o.loc][a] -= q;
-        if (H[o.loc][a] < 0) errors.push({ op: o.id, loc: o.loc, asset: a, short: -H[o.loc][a] });
-        const b = basis[a];
-        const frac = b.q > 0 ? Math.min(1, q / b.q) : 0;
-        removed = { r: b.r * frac, u: b.u * frac };
-        b.q -= q; b.r -= removed.r; b.u -= removed.u;
-        if (b.q <= 0) { b.q = Math.max(0, b.q); if (b.q === 0) { b.r = 0; b.u = 0; } }
-        if (o.out.pieces) { const pl = pieces[o.loc] = pieces[o.loc] || {}; for (const w in o.out.pieces) pl[w] = (pl[w] || 0) - o.out.pieces[w]; }
+  function toJ(date) {
+    const j = d2j(g2d(date.getFullYear(), date.getMonth() + 1, date.getDate()));
+    return jStr(j.jy, j.jm, j.jd);
+  }
+  function toG(js) {
+    const { y, m, d } = jParse(js);
+    return d2g(j2d(y, m, d)); // {gy, gm, gd}
+  }
+  const today = () => toJ(new Date());
+  const ym = js => js.slice(0, 7);
+
+  // افزودن n ماه، با محدود کردن روز به طول ماه مقصد
+  function addMonths(js, n, dayWanted) {
+    const { y, m, d } = jParse(js);
+    let t = (y * 12 + (m - 1)) + n;
+    const ny = Math.floor(t / 12), nm = (t % 12) + 1;
+    const want = dayWanted || d;
+    return jStr(ny, nm, Math.min(want, monthLen(ny, nm)));
+  }
+  function addYm(ymStr, n) {
+    const [y, m] = ymStr.split('/').map(Number);
+    const t = y * 12 + (m - 1) + n;
+    return `${Math.floor(t / 12)}/${pad((t % 12) + 1)}`;
+  }
+  function addDays(js, n) {
+    const { y, m, d } = jParse(js);
+    const j = d2j(j2d(y, m, d) + n);
+    return jStr(j.jy, j.jm, j.jd);
+  }
+  function diffDays(a, b) { // b - a
+    const A = jParse(a), B = jParse(b);
+    return j2d(B.y, B.m, B.d) - j2d(A.y, A.m, A.d);
+  }
+  const MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+  const WEEKDAYS = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
+  function weekday(js) { const g = toG(js); return WEEKDAYS[new Date(g.gy, g.gm - 1, g.gd).getDay()]; }
+
+  // ---------- اعداد و قالب‌بندی ----------
+  function normDigits(s) {
+    return String(s || '')
+      .replace(/[۰-۹]/g, c => String(c.charCodeAt(0) - 1776))
+      .replace(/[٠-٩]/g, c => String(c.charCodeAt(0) - 1632))
+      .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+      .replace(/٬|،/g, ',');
+  }
+  const faDigits = s => String(s).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]);
+  const nf = new Intl.NumberFormat('en-US');
+  const faNum = n => faDigits(nf.format(Math.round(n))).replace(/,/g, '٬');
+
+  // ---------- پارسر پیامک بانک ----------
+  const num = s => Number(String(s).replace(/,/g, ''));
+
+  function inferYear(month, refJ) {
+    const r = jParse(refJ || today());
+    return month > r.m + 1 ? r.y - 1 : r.y;
+  }
+
+  function parseSMS(raw, refJ) {
+    const text = normDigits(raw).trim();
+    if (!text) return null;
+    const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
+    const out = { bank: '', account: '', type: '', amount: 0, balance: null, date: '', time: '', note: '' };
+
+    const timeM = text.match(/(?:^|\s)(\d{1,2}):(\d{2})(?:\s|$)/m);
+    if (timeM) out.time = `${pad(timeM[1])}:${timeM[2]}`;
+
+    if (/بلو/.test(text)) {
+      out.bank = 'بلو';
+      const a = text.match(/([\d,]+)\s*ریال\s*(از|به)\s*حساب/);
+      if (a) out.amount = num(a[1]);
+      if (/برداشت|پرید|کسر/.test(text)) out.type = 'expense';
+      else if (/واریز|نشست/.test(text)) out.type = 'income';
+      else if (a) out.type = a[2] === 'از' ? 'expense' : 'income';
+      const b = text.match(/موجودی\s*:?\s*([\d,]+)/);
+      if (b) out.balance = num(b[1]);
+      const d = text.match(/(1[34]\d\d)[.\/-](\d{1,2})[.\/-](\d{1,2})/);
+      if (d) out.date = jStr(+d[1], +d[2], +d[3]);
+      const title = lines[1] && !/\d/.test(lines[1]) ? lines[1] : '';
+      out.note = title;
+    } else if (/خاورمیانه/.test(text)) {
+      out.bank = 'خاورمیانه';
+      const acc = text.match(/(\d{3}\/\d{5,})/);
+      if (acc) out.account = acc[1];
+      const a = text.match(/^([+-])\s*([\d,]+)\s*$/m);
+      if (a) { out.amount = num(a[2]); out.type = a[1] === '-' ? 'expense' : 'income'; }
+      const b = text.match(/مانده\s*:?\s*(-?[\d,]+)/);
+      if (b) out.balance = num(b[1]);
+      const dl = lines.find(l => /^\d{2}\/\d{2}$/.test(l));
+      if (dl) { const [mm, dd] = dl.split('/').map(Number); out.date = jStr(inferYear(mm, refJ), mm, dd); }
+      out.note = lines.filter(l =>
+        !/خاورمیانه/.test(l) && !/^[+-]\s*[\d,]+$/.test(l) && !/^\d{3}\/\d+$/.test(l) &&
+        !/^\d{2}\/\d{2}$/.test(l) && !/^\d{1,2}:\d{2}$/.test(l) && !/^مانده/.test(l)).join(' - ');
+    } else {
+      // حالت عمومی برای بانک‌های دیگر
+      out.bank = lines[0] && !/\d/.test(lines[0]) ? lines[0].slice(0, 30) : 'بانک';
+      const signed = text.match(/(?:^|\s)([+-])\s*([\d,]{3,})/m);
+      if (signed) { out.amount = num(signed[2]); out.type = signed[1] === '-' ? 'expense' : 'income'; }
+      if (!out.amount) {
+        const cleaned = text.replace(/(موجودی|مانده)\s*:?\s*-?[\d,]+/g, '');
+        const m = cleaned.match(/([\d]{1,3}(?:,\d{3})+|\d{4,})\s*(?:ریال)?/);
+        if (m) out.amount = num(m[1]);
       }
-      if (o.proceeds != null && o.out && !o.in) { // فروش و خروج پول به حساب بانکی
-        realized.r += o.proceeds - removed.r; realized.byAsset[o.out.a] += o.proceeds - removed.r;
-        if (u) realized.u += o.proceeds / u - removed.u;
-        flows.push({ date: o.date, r: -o.proceeds });
-      } else if (o.out && !o.in && o.out.a === 'irr') { // برداشت ریال
-        flows.push({ date: o.date, r: -o.out.q });
+      if (!out.type) {
+        if (/برداشت|خرید|انتقال از|کسر|پرداخت/.test(text)) out.type = 'expense';
+        else if (/واریز|انتقال به حساب شما|نشست|دریافت/.test(text)) out.type = 'income';
       }
-      if (o.in) {
-        const { a, q } = o.in, dest = o.loc2 || o.loc;
-        hold(dest, a); H[dest][a] += q;
-        const b = basis[a];
-        if (o.cost != null) { // ورود از بیرون
-          b.q += q; b.r += o.cost; if (u) b.u += o.cost / u;
-          flows.push({ date: o.date, r: o.cost });
-        } else if (a === 'irr' && o.out && o.out.a !== 'irr') { // فروش و ماندن ریال در همان محل
-          b.q += q; b.r += q; if (u) b.u += q / u;
-          realized.r += q - removed.r; realized.byAsset[o.out.a] += q - removed.r;
-          if (u) realized.u += q / u - removed.u;
-        } else { // خرید با ریالِ محل، تبدیل یا انتقال: بهای تمام‌شده منتقل می‌شه
-          b.q += q; b.r += removed.r; b.u += removed.u;
-        }
-        if (a === 'irr') idle[dest] = o.date;
-        if (o.in.pieces) { const pl = pieces[dest] = pieces[dest] || {}; for (const w in o.in.pieces) pl[w] = (pl[w] || 0) + o.in.pieces[w]; }
+      const b = text.match(/(?:موجودی|مانده)\s*:?\s*(-?[\d,]+)/);
+      if (b) out.balance = num(b[1]);
+      const full = text.match(/(1[34]\d\d)[.\/-](\d{1,2})[.\/-](\d{1,2})/);
+      if (full) out.date = jStr(+full[1], +full[2], +full[3]);
+      else {
+        const s = text.match(/(?:^|\s)(\d{2})\/(\d{2})(?:\s|$)/m);
+        if (s && +s[1] <= 12) out.date = jStr(inferYear(+s[1], refJ), +s[1], +s[2]);
       }
     }
-    // جمع هر دارایی در همه‌ی محل‌ها
-    const totals = {}; ORDER.forEach(a => { totals[a] = 0; });
-    for (const loc in H) for (const a in H[loc]) totals[a] += H[loc][a];
-    return { H, pieces, basis, realized, flows, errors, idle, totals };
-  }
-
-  // ارزش کل و تفکیک‌ها با آخرین قیمت
-  function portfolio(state) {
-    const R = replay(state), P = latestPrice(state), S = state.settings;
-    const assets = ORDER.map(a => {
-      const q = R.totals[a], v = valueRial(a, q, P, S), b = R.basis[a];
-      return { a, q, value: v, basisR: b.r, basisU: b.u,
-        pnlR: v === null ? null : v - b.r, pnlU: v === null || !P ? null : v / P.usdt - b.u,
-        avgUnit: b.q > 0 ? b.r / b.q : null };
-    });
-    const total = assets.reduce((s, x) => s + (x.value || 0), 0);
-    const byLoc = state.locations.map(l => {
-      const h = R.H[l.id] || {};
-      const v = ORDER.reduce((s, a) => s + (valueRial(a, h[a] || 0, P, S) || 0), 0);
-      return { loc: l, h, value: v, pieces: R.pieces[l.id] || {} };
-    });
-    const unreal = assets.reduce((s, x) => s + (x.pnlR || 0), 0);
-    const unrealU = assets.reduce((s, x) => s + (x.pnlU || 0), 0);
-    return { R, P, assets, total, byLoc, pnlR: unreal + R.realized.r, pnlU: unrealU + R.realized.u, unrealR: unreal, realized: R.realized };
-  }
-
-  // واحدهای سنجش: تومان، دلار (تتر)، گرم طلا
-  function lens(rial, lensName, P) {
-    if (rial === null || rial === undefined) return null;
-    if (lensName === 'usd') return P ? rial / P.usdt : null;
-    if (lensName === 'gold') return P ? rial / P.gold : null;
-    return rial / 10;
-  }
-
-  // ریال‌هایی که یه جا مونده: از آخرین ورود ریال، و افت ارزش دلاریش
-  function idleCash(state, todayStr, minDays) {
-    const R = replay(state), P = latestPrice(state), out = [];
-    for (const l of state.locations) {
-      const q = (R.H[l.id] || {}).irr || 0, since = R.idle[l.id];
-      if (q <= 0 || !since) continue;
-      const days = J.diffDays(since, todayStr);
-      if (days < (minDays || 0)) continue;
-      const then = priceAt(state, since);
-      const usdLoss = then && P ? 1 - then.usdt / P.usdt : null;
-      out.push({ loc: l, q, since, days, usdLoss });
-    }
-    return out.sort((a, b) => b.q - a.q);
-  }
-
-  // «اگه جاش…»: همه‌ی پولی که وارد کردی، از همون روز در یه دارایی دیگه بود
-  function whatIf(state) {
-    const R = replay(state), P = latestPrice(state), S = state.settings;
-    if (!P) return null;
-    const alt = {};
-    for (const a of ['gold', 'usdt', 'btc', 'irr']) {
-      let units = 0, ok = true;
-      for (const f of R.flows) {
-        const Pd = priceAt(state, f.date), u = unitRial(a, Pd, S);
-        if (!u) { ok = false; break; }
-        units += f.r / u;
-      }
-      alt[a] = ok ? units * unitRial(a, P, S) : null;
-    }
-    const invested = R.flows.reduce((s, f) => s + f.r, 0);
-    return { alt, invested, actual: portfolio(state).total };
-  }
-
-  // ارزش دارایی در هر تاریخی که قیمت ثبت شده
-  function history(state) {
-    const S = state.settings;
-    return sortedPrices(state).map(P => {
-      const R = replay(state, P.date);
-      const total = ORDER.reduce((s, a) => s + (valueRial(a, R.totals[a], P, S) || 0), 0);
-      return { date: P.date, total, P };
-    }).filter((x, i, arr) => x.total > 0 || i === arr.length - 1);
-  }
-
-  // پیشرفت هدف‌ها: kind = gold (آنلاین + شمش، گرم) | usdt | btc | value (با واحد سنجش)
-  function goalProgress(state, g) {
-    const R = replay(state), P = latestPrice(state);
-    let cur;
-    if (g.kind === 'gold') cur = (R.totals.gold + R.totals.bar) / 1000;
-    else if (g.kind === 'usdt') cur = R.totals.usdt / 1e6;
-    else if (g.kind === 'btc') cur = R.totals.btc / 1e8;
-    else cur = lens(portfolio(state).total, g.lens || 'toman', P);
-    return { cur, target: g.target, ratio: g.target > 0 && cur !== null ? Math.min(1, cur / g.target) : 0 };
-  }
-
-  // ---------- پارسر پیام قیمت (تلگرام، سایت) ----------
-  function parsePrices(raw, last) {
-    const t = J.normDigits(raw || '').replace(/٫/g, '.');
-    const num = s => Number(s.replace(/[,٬\s]/g, ''));
-    const grab = re => { const m = t.match(re); return m ? num(m[m.length - 1]) : null; };
-    let gold = grab(/(?:طلا|گرم)[^\n\d]{0,25}(?:18|۱۸)?[^\n\d]{0,20}?([\d][\d,٬]{3,})/);
-    if (gold === null) gold = grab(/(?:18|۱۸)\s*عیار[^\n\d]{0,20}([\d][\d,٬]{3,})/);
-    let usdt = grab(/(?:تتر|usdt|tether)[^\n\d]{0,20}([\d][\d,٬]{2,})/i);
-    let btc = grab(/(?:بیت\s*‌?کوین|bitcoin|btc)[^\n\d$]{0,20}\$?\s*([\d][\d,٬.]{2,})/i);
-    const out = {};
-    // واحد: ریال یا تومان؛ نزدیک‌ترین به قیمت قبلی، وگرنه تومان فرض می‌شه
-    const toRial = (v, prev) => {
-      if (v === null || !isFinite(v) || v <= 0) return null;
-      if (prev) return Math.abs(Math.log10(v / prev)) <= Math.abs(Math.log10(v * 10 / prev)) ? v : v * 10;
-      return v * 10;
-    };
-    out.gold = toRial(gold, last && last.gold);
-    out.usdt = toRial(usdt, last && last.usdt);
-    if (btc !== null && btc > 0) {
-      // اگه به تومان/ریال اومده بود (خیلی بزرگ)، با قیمت تتر به تتر تبدیل می‌شه
-      const u = out.usdt || (last && last.usdt);
-      out.btc = btc > 5e6 && u ? Math.round(toRial(btc, last && last.btc && last.usdt ? last.btc * last.usdt : null) / u) : btc;
-    } else out.btc = null;
+    if (!out.date) out.date = refJ || today();
+    if (!out.amount) return { ...out, error: 'مبلغ در متن پیامک پیدا نشد.' };
+    if (!out.type) out.type = 'expense';
     return out;
   }
 
-  root.V = { ASSETS, ORDER, parseQty, fmtQty, latestPrice, priceAt, unitRial, valueRial, replay, portfolio, lens,
-    idleCash, whatIf, history, goalProgress, parsePrices, opSort };
+  // ---------- تعهدات: اقساط و پرداخت‌های ماهانه ----------
+  function txAmountMap(state) { const m = new Map(); for (const t of state.tx) m.set(t.id, t.amount); return m; }
+  function loanDue(loan, i) { return addMonths(loan.first, i, jParse(loan.first).d); }
+
+  // هر تعهد: amount = مبلغ واقعی اگه پرداخت شده، وگرنه مبلغ اسمی/پیش‌بینی
+  function obligationsForMonth(state, ymStr, txMap) {
+    txMap = txMap || txAmountMap(state);
+    const [y, m] = ymStr.split('/').map(Number);
+    const paidAmount = (info, nominal) => info.txId && txMap.has(info.txId) ? txMap.get(info.txId) : nominal;
+    const list = [];
+    for (const l of state.loans) {
+      const [fy, fm] = l.first.split('/').map(Number);
+      const i = (y * 12 + m) - (fy * 12 + fm);
+      if (i < 0 || i >= l.count) continue;
+      const info = l.paid && l.paid[i];
+      list.push({ kind: 'loan', id: l.id, key: String(i), name: l.name, sub: `قسط ${faDigits(i + 1)} از ${faDigits(l.count)}`,
+        estimate: l.amount, amount: info ? paidAmount(info, l.amount) : l.amount, due: loanDue(l, i), paid: !!info, variable: false });
+    }
+    for (const f of state.fixed) {
+      if (f.start && ymStr < f.start) continue;
+      if (f.end && ymStr > f.end) continue;
+      const info = f.paid && f.paid[ymStr];
+      list.push({ kind: 'fixed', id: f.id, key: ymStr, name: f.name, sub: f.variable ? 'متغیر، پیش‌بینی' : 'پرداخت ماهانه',
+        estimate: f.amount, amount: info ? paidAmount(info, f.amount) : f.amount, due: jStr(y, m, Math.min(f.day, monthLen(y, m))),
+        paid: !!info, variable: !!f.variable });
+    }
+    return list.sort((a, b) => a.due.localeCompare(b.due) || a.name.localeCompare(b.name));
+  }
+
+  // تعهدات پرداخت‌نشده در بازه‌ی چند ماه اطراف ماه مرجع
+  function openObligations(state, refYm, fromOffset, toOffset) {
+    const map = txAmountMap(state); let all = [];
+    for (let i = fromOffset; i <= toOffset; i++) all = all.concat(obligationsForMonth(state, addYm(refYm, i), map));
+    return all.filter(o => !o.paid);
+  }
+
+  function monthStats(state, ymStr) {
+    const map = txAmountMap(state);
+    const txs = state.tx.filter(t => ym(t.date) === ymStr);
+    const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const variable = txs.filter(t => t.type === 'expense' && !t.link).reduce((s, t) => s + t.amount, 0);
+    const obs = obligationsForMonth(state, ymStr, map);
+    const sum = arr => arr.reduce((s, o) => s + o.amount, 0);
+    const unpaid = obs.filter(o => !o.paid), paid = obs.filter(o => o.paid);
+    const obTotal = sum(obs), obPaid = sum(paid), obRemaining = sum(unpaid);
+    const expected = (state.settings && state.settings.expectedIncome) || 0;
+    const base = Math.max(income, expected);
+    return { income, expected, base, hasIncome: base > 0, usedExpected: expected > income, variable, obs,
+      obTotal, obPaid, obRemaining, count: obs.length, paidCount: paid.length,
+      loanRemaining: sum(unpaid.filter(o => o.kind === 'loan')),
+      fixedRemaining: sum(unpaid.filter(o => o.kind === 'fixed' && !o.variable)),
+      varRemaining: sum(unpaid.filter(o => o.variable)),
+      free: base - obTotal - variable };
+  }
+
+  function loanSummary(loan) {
+    const paidCount = Object.keys(loan.paid || {}).filter(k => +k < loan.count).length;
+    const remainingCount = Math.max(0, loan.count - paidCount);
+    let next = null;
+    for (let i = 0; i < loan.count; i++) if (!(loan.paid || {})[i]) { next = { i, due: loanDue(loan, i) }; break; }
+    return { paidCount, remainingCount, remainingAmount: remainingCount * loan.amount, last: loanDue(loan, loan.count - 1), next };
+  }
+
+  // ---------- شاخص‌ها (KPI) و داده‌ی نمودارها ----------
+  const ymIndex = s => { const [y, m] = s.split('/').map(Number); return y * 12 + m - 1; };
+
+  // خرج یک ماه به تفکیک: اقساط وام، پرداخت‌های ماهانه، خرج روزمره
+  function monthOutflow(state, ymStr) {
+    const o = { loans: 0, bills: 0, daily: 0, total: 0 };
+    for (const t of state.tx) {
+      if (t.type !== 'expense' || ym(t.date) !== ymStr) continue;
+      if (t.link && t.link.kind === 'loan') o.loans += t.amount;
+      else if (t.link) o.bills += t.amount;
+      else o.daily += t.amount;
+      o.total += t.amount;
+    }
+    return o;
+  }
+  function categoryTotals(state, ymStr) {
+    const m = {};
+    for (const t of state.tx) if (t.type === 'expense' && ym(t.date) === ymStr) { const c = t.cat || 'سایر'; m[c] = (m[c] || 0) + t.amount; }
+    return m;
+  }
+  function cumulativeByDay(state, ymStr) {
+    const [y, m] = ymStr.split('/').map(Number), len = monthLen(y, m), arr = new Array(len).fill(0);
+    for (const t of state.tx) if (t.type === 'expense' && ym(t.date) === ymStr) arr[Math.min(len, jParse(t.date).d) - 1] += t.amount;
+    for (let i = 1; i < len; i++) arr[i] += arr[i - 1];
+    return arr;
+  }
+  // اقساط پرداخت‌نشده‌ی هر وام که سررسیدشون بعد از ماه داده‌شده است
+  function unpaidAfter(loan, ymStr) {
+    let n = 0; const lim = ymIndex(ymStr);
+    for (let i = 0; i < loan.count; i++) if (!(loan.paid || {})[i] && ymIndex(ym(loanDue(loan, i))) > lim) n++;
+    return n;
+  }
+  // روند بدهی: نقطه‌ی اول = مانده‌ی واقعی الان؛ بعد با فرض پرداخت طبق برنامه
+  function debtProjection(state, curYm, maxMonths) {
+    const pts = [{ ym: curYm, now: true, total: state.loans.reduce((s, l) => s + loanSummary(l).remainingAmount, 0) }];
+    for (let k = 0; k < maxMonths; k++) {
+      const m = addYm(curYm, k);
+      const total = state.loans.reduce((s, l) => s + unpaidAfter(l, m) * l.amount, 0);
+      pts.push({ ym: m, total });
+      if (!total) break;
+    }
+    return pts;
+  }
+  function debtFreeYm(state) {
+    let last = null;
+    for (const l of state.loans) for (let i = l.count - 1; i >= 0; i--) if (!(l.paid || {})[i]) { const m = ym(loanDue(l, i)); if (!last || m > last) last = m; break; }
+    return last;
+  }
+  function obligationForecast(state, curYm, n) {
+    const map = txAmountMap(state), out = [];
+    for (let k = 0; k < n; k++) {
+      const m = addYm(curYm, k), f = { ym: m, loans: 0, fixed: 0, variable: 0 };
+      for (const o of obligationsForMonth(state, m, map)) f[o.kind === 'loan' ? 'loans' : o.variable ? 'variable' : 'fixed'] += o.amount;
+      f.total = f.loans + f.fixed + f.variable; out.push(f);
+    }
+    return out;
+  }
+  // اقساطی که در n ماه آینده تموم می‌شن و پول ماهانه آزاد می‌کنن
+  function reliefWithin(state, curYm, n) {
+    const lim = addYm(curYm, n - 1); let amount = 0; const loans = [];
+    for (const l of state.loans) {
+      const s = loanSummary(l); if (!s.remainingCount) continue;
+      const last = ym(s.last);
+      if (last >= curYm && last <= lim) { amount += l.amount; loans.push(l.name); }
+    }
+    return { amount, loans };
+  }
+  // پرداخت به‌موقع: پرداخت‌های ثبت‌شده (نه «قبلی») که تاریخشون ≤ سررسید بوده
+  function onTimeRate(state, fromYm, toYm) {
+    let n = 0, ok = 0;
+    for (const l of state.loans) for (const k of Object.keys(l.paid || {})) {
+      const info = l.paid[k]; if (!info || info.prior || +k >= l.count) continue;
+      const due = loanDue(l, +k), m = ym(due); if (m < fromYm || m > toYm) continue;
+      n++; if ((info.date || '') <= due) ok++;
+    }
+    for (const f of state.fixed) for (const k of Object.keys(f.paid || {})) {
+      const info = f.paid[k]; if (!info || k < fromYm || k > toYm || !/^\d{4}\/\d{2}\/\d{2}$/.test(info.date || '')) continue;
+      const [y, m] = k.split('/').map(Number), due = jStr(y, m, Math.min(f.day, monthLen(y, m)));
+      n++; if (info.date <= due) ok++;
+    }
+    return { n, ok, rate: n ? ok / n : null };
+  }
+  function varianceOfVariable(state, ymStr) {
+    const items = obligationsForMonth(state, ymStr).filter(o => o.variable);
+    const paid = items.filter(o => o.paid);
+    return { items, est: paid.reduce((s, o) => s + o.estimate, 0), actual: paid.reduce((s, o) => s + o.amount, 0), paidCount: paid.length };
+  }
+  function kpis(state, ymStr, todayStr) {
+    const prev = addYm(ymStr, -1), st = monthStats(state, ymStr), stp = monthStats(state, prev);
+    const out = monthOutflow(state, ymStr), outp = monthOutflow(state, prev);
+    const [y, m] = ymStr.split('/').map(Number), len = monthLen(y, m);
+    const curYm = ym(todayStr), isCur = ymStr === curYm, isFuture = ymStr > curYm;
+    const days = isCur ? jParse(todayStr).d : isFuture ? 0 : len;
+    const loanOb = st.obs.filter(o => o.kind === 'loan').reduce((s, o) => s + o.amount, 0);
+    const loanObPrev = stp.obs.filter(o => o.kind === 'loan').reduce((s, o) => s + o.amount, 0);
+    const debtNow = state.loans.reduce((s, l) => s + loanSummary(l).remainingAmount, 0);
+    const free = debtFreeYm(state);
+    const income = st.base;
+    return {
+      ym: ymStr, prev, days, len, isCur,
+      progress: st.count ? st.obPaid / st.obTotal : null, paidCount: st.paidCount, count: st.count,
+      onTime: onTimeRate(state, addYm(ymStr, -5), ymStr),
+      loanLoad: loanOb, loanLoadPrev: loanObPrev,
+      outflow: out.total, outflowPrev: outp.total, outParts: out,
+      dailyAvg: days ? out.daily / days : 0, dailyProjected: days ? out.daily / days * len : 0,
+      debtNow, debtPaidThisMonth: out.loans,
+      debtFree: free, monthsToFree: free ? ymIndex(free) - ymIndex(curYm) : 0,
+      relief: reliefWithin(state, curYm, 3),
+      variance: varianceOfVariable(state, ymStr),
+      loanShare: out.total ? out.loans / out.total : null,
+      income, hasIncome: income > 0,
+      dti: income ? loanOb / income : null,
+      savingsRate: income ? (income - out.total) / income : null
+    };
+  }
+
+  root.Core = { toJ, toG, today, ym, addMonths, addYm, addDays, diffDays, monthLen, jParse, jStr, pad,
+    MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, openObligations, monthStats, loanDue, loanSummary,
+    ymIndex, monthOutflow, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis };
+  root.J = root.Core;
 })(typeof window !== 'undefined' ? window : globalThis);
