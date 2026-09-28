@@ -104,17 +104,19 @@
     `<button data-act="lens" data-l="${k}" aria-pressed="${lensName() === k}">${n}</button>`).join('')}</div>`;
 
   function overviewHtml() {
-    const t = today(), P = V.latestPrice(S), pf = V.portfolio(S), lz = lensName();
+    const t = today(), P = V.latestPrice(S), pf0 = V.portfolio(S), lz = lensName(), bank = App.bankTotal();
+    const pf = { ...pf0, total: pf0.total + bank, assets: bank ? pf0.assets.concat([{ a: 'bank', q: bank, value: bank }]) : pf0.assets };
     const others = Object.keys(LENS).filter(k => k !== lz);
     const hasOps = S.ops.length > 0;
     const stale = P ? J.diffDays(P.date, t) : null;
     const idle = V.idleCash(S, t, 7);
     const onboarding = !P || !S.locations.length || !hasOps;
     const allocTotal = pf.assets.reduce((s, x) => s + Math.max(0, x.value || 0), 0) || 1;
+    const aName = a => a === 'bank' ? 'موجودی بانک‌ها' : ASSETS[a].name;
     return `
     <section class="nw" aria-label="ارزش کل">
       <div class="nw-row">${lensSwitch()}</div>
-      <p class="nw-label">ارزش کل دارایی</p>
+      <p class="nw-label">ارزش کل دارایی${bank ? ' (با موجودی بانک‌ها)' : ''}</p>
       <p class="nw-num"><span id="nwNum">${P || !hasOps ? fmtLens(pf.total, lz, false) : '—'}</span><small>${LENS[lz]}</small></p>
       ${P ? `<p class="equiv">${others.map(k => `<b>${fmtLens(pf.total, k, false)}</b> ${LENS[k]}`).join(' یا ')}</p>` : ''}
       ${P && hasOps ? `<div class="pnl"><span class="${pf.pnlR >= 0 ? 'up' : 'down'}">سود و زیان تومانی: <bdi dir="ltr">${pf.pnlR >= 0 ? '+' : '−'}${faNum(Math.abs(pf.pnlR) / 10)}</bdi> تومان</span>
@@ -133,10 +135,12 @@
       <button data-act="opchooser"><span class="qi">${IC.plus}</span>بیشتر</button>
     </nav>
     ${idle.length ? `<section class="block"><h2>ریالِ بلااستفاده</h2>${idle.map(x => `<div class="notice">${IC.clock}<span><b>${toman(x.q)}</b> از ${ago(x.since)} در <b>${esc(x.loc.name)}</b> مونده.${x.usdLoss !== null && x.usdLoss > 0.001 ? ` در این مدت به دلار حدود <b>${dec(x.usdLoss * 100, 1)}٪</b> ارزش از دست داده.` : ''}</span></div>`).join('')}</section>` : ''}
-    ${hasOps ? `<section class="block"><div class="block-head"><h2>ترکیب دارایی</h2></div>
+    ${hasOps || bank ? `<section class="block"><div class="block-head"><h2>ترکیب دارایی</h2></div>
       <div class="alloc" role="img" aria-label="ترکیب دارایی">${pf.assets.filter(x => x.value > 0).map(x => `<i class="k-${x.a}" style="width:${x.value / allocTotal * 100}%"></i>`).join('')}</div>
-      <div class="legend">${pf.assets.filter(x => x.value > 0).map(x => `<span><i class="k-${x.a}"></i>${ASSETS[x.a].name} <b>${dec(x.value / allocTotal * 100, 0)}٪</b></span>`).join('')}</div></section>
-    <section class="block"><h2>بر اساس محل</h2><ul class="ledger">${pf.byLoc.filter(x => ORDER.some(a => (x.h[a] || 0) !== 0)).sort((a, b) => b.value - a.value).map(x => `
+      <div class="legend">${pf.assets.filter(x => x.value > 0).map(x => `<span><i class="k-${x.a}"></i>${aName(x.a)} <b>${dec(x.value / allocTotal * 100, 0)}٪</b></span>`).join('')}</div></section>
+    <section class="block"><h2>بر اساس محل</h2><ul class="ledger">${bank ? `<li><button class="row" data-act="goset"><i class="key k-bank"></i>
+        <span class="main"><strong>حساب‌های بانکی</strong><span>${App.bankAccounts().filter(a => a.balance > 0).map(a => esc(a.name)).join('، ')}</span></span>
+        <span class="side"><b>${fmtLens(bank)}</b></span></button></li>` : ''}${pf.byLoc.filter(x => ORDER.some(a => (x.h[a] || 0) !== 0)).sort((a, b) => b.value - a.value).map(x => `
       <li><button class="row" data-act="loc" data-id="${esc(x.loc.id)}"><i class="key" style="background:var(--gold)"></i>
         <span class="main"><strong>${esc(x.loc.name)}</strong><span>${ORDER.filter(a => x.h[a]).map(a => qtyTxt(x.h[a], a)).join('، ')}</span></span>
         <span class="side"><b>${fmtLens(x.value)}</b></span></button></li>`).join('')}</ul></section>` : ''}
@@ -329,10 +333,10 @@
 
   // ---------- محل‌ها ----------
   function openLocs() {
-    const sug = ['صرافی', 'پلتفرم طلا', 'کیف پول شخصی', 'خانه', 'صندوق امانات'].filter(n => !S.locations.some(l => l.name === n));
+    const sug = ['وال‌گلد', 'والکس', 'نوبیتکس', 'کاریزما', 'خانه', 'کیف پول شخصی', 'صندوق امانات'].filter(n => !S.locations.some(l => l.name === n));
     const html = `<p class="note">هر جایی که دارایی یا ریالت اونجاست. اسم دقیق صرافی یا پلتفرم رو بنویس تا بعداً راحت پیداشون کنی.</p>
       ${sug.length ? `<div class="chips wrap">${sug.map(n => `<button type="button" class="chip" data-sug="${esc(n)}">+ ${esc(n)}</button>`).join('')}</div>` : ''}
-      <label class="lbl">یا اسم دلخواه</label><div class="btnrow" style="margin-top:0"><input id="locname" placeholder="مثلاً نوبیتکس یا میلی"><button class="btn" id="locadd">افزودن</button></div>
+      <label class="lbl">یا اسم دلخواه</label><div class="btnrow" style="margin-top:0"><input id="locname" placeholder="مثلاً صرافی یا پلتفرم طلای دیگه"><button class="btn" id="locadd">افزودن</button></div>
       <p class="note" id="loclist">${S.locations.map(l => esc(l.name)).join('، ')}</p>`;
     openSheet('محل‌های نگهداری', html, ov => {
       const add = name => { name = name.trim().slice(0, 40); if (!name) return; if (S.locations.some(l => l.name === name)) { toast('این اسم قبلاً هست.', 'bad'); return; }
@@ -578,16 +582,18 @@
   const signed = (rial, lz) => { const t = fmtLens(Math.abs(rial), lz, false); return t === '—' ? t : `<bdi dir="ltr">${rial < 0 ? '−' : ''}${t}</bdi>`; };
   function homeCard() {
     const P = V.latestPrice(S), pf = V.portfolio(S), lz = lensName();
-    const { owe, owed } = App.debtTotals(), loans = App.loanRemaining();
-    if (!S.ops.length && !P) return `<section class="block"><button class="nwcard empty" data-act="goinv"><span class="nwc-l">سرمایه و ارزش خالص</span>
-      <span class="nwc-cta">طلا، دلار، تتر، بیت‌کوین… رو اضافه کن تا ارزش خالصت رو ببینی</span></button></section>`;
-    const netRial = pf.total - loans - owe + owed;
+    const { owe, owed } = App.debtTotals(), loans = App.loanRemaining(), bank = App.bankTotal(), credit = App.creditUsedTotal();
+    if (!S.ops.length && !P && !bank) return `<section class="block"><button class="nwcard empty" data-act="goinv"><span class="nwc-l">دارایی و ارزش خالص</span>
+      <span class="nwc-cta">موجودی بانک‌ها رو از تنظیمات، و طلا، دلار، تتر… رو از تب دارایی اضافه کن تا ارزش خالصت رو ببینی.</span></button></section>`;
+    const assets = pf.total + bank, debts = loans + owe + credit, netRial = assets - debts + owed;
     const stale = P ? J.diffDays(P.date, today()) : null;
     return `<section class="block"><div class="nwcard">
-      <div class="nwc-top"><span class="nwc-l">سرمایه</span>${lensSwitch()}</div>
-      <button class="nwc-main" data-act="goinv"><b>${fmtLens(pf.total, lz, false)}</b><small>${LENS[lz]}</small></button>
+      <div class="nwc-top"><span class="nwc-l">دارایی کل</span>${lensSwitch()}</div>
+      <button class="nwc-main" data-act="goinv"><b>${fmtLens(assets, lz, false)}</b><small>${LENS[lz]}</small></button>
       <dl class="nwc-rows">
-        <div><dt>بدهی وام‌ها و اشخاص</dt><dd>${signed(-(loans + owe), lz)}</dd></div>
+        ${pf.total ? `<div><dt>سرمایه‌گذاری</dt><dd>${signed(pf.total, lz)}</dd></div>` : ''}
+        ${bank ? `<div><dt>موجودی بانک‌ها</dt><dd>${signed(bank, lz)}</dd></div>` : ''}
+        <div><dt>بدهی (وام، اشخاص، اعتبار خرید)</dt><dd>${signed(-debts, lz)}</dd></div>
         ${owed ? `<div><dt>طلب از اشخاص</dt><dd>${signed(owed, lz)}</dd></div>` : ''}
         <div class="net"><dt>ارزش خالص</dt><dd>${signed(netRial, lz)} ${LENS[lz]}</dd></div>
       </dl>

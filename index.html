@@ -231,6 +231,7 @@ li.empty { padding: 14px; }
 .fx-row b { font-variant-numeric: tabular-nums; }
 .fx-row em { font-style: normal; font-size: .8rem; color: var(--muted); }
 .fx-row em.warn { color: var(--warn); } .fx-row em.ok { color: var(--good); }
+.tag.info { color: var(--info); background: var(--info-soft); margin-inline-end: 6px; }
 .tag { display: inline-block; margin-top: 8px; font-size: .72rem; font-weight: 600; color: var(--warn); background: var(--warn-soft); border-radius: 6px; padding: 2px 8px; }
 .card.debt { border-inline-start: 4px solid var(--bad); } .card.debt.owed { border-inline-start-color: var(--good); }
 
@@ -581,6 +582,20 @@ textarea { min-height: 130px; margin-top: 12px; resize: vertical; }
 .ob.inc .tick { border-color: var(--good); }
 .ob.inc.paid .tick { background: var(--good); border-color: var(--good); color: #fff; }
 @media (max-width: 360px) { .hubgrid:not(.two-col) { grid-template-columns: repeat(2, 1fr); } .catgrid { grid-template-columns: repeat(3, 1fr); } }
+
+/* ===== نسخه‌ی ۳.۱: حساب‌ها، اعتبار، فهرست‌ها ===== */
+:root { --a-bank: #5B7FA6; }
+.k-bank { background: var(--a-bank); }
+.accs li.acc-total { border-bottom: 1px solid var(--line-2); }
+.accs li.acc-total span { font-weight: 800; } .accs li.acc-total b { font-weight: 800; }
+.accs li.credit b small { font-size: .72rem; color: var(--muted); font-weight: 500; }
+.cmeter { grid-column: 1 / -1; display: block; height: 5px; border-radius: 99px; background: var(--surface-2); margin-top: 6px; overflow: hidden; }
+.cmeter > i { display: block; height: 100%; background: var(--warn); border-radius: 99px; }
+.listed { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
+.listed li { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; }
+.unitwrap.sm input { font-size: .95rem !important; font-weight: 700; padding-inline-end: 56px !important; min-height: 44px; }
+.unitwrap.sm span { font-size: .74rem; }
+@media (max-width: 360px) { .listed li { grid-template-columns: 1fr auto; } .listed li .unitwrap { grid-column: 1 / -1; grid-row: 2; } }
 </style>
 </head>
 <body>

@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۳';
+  const VERSION = '۴';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -34,16 +34,38 @@
   };
 
   // ---------- ذخیره‌سازی ----------
+  const EXPENSE_CATS = ['وام', 'قسط', 'کادو', 'خرید منزل', 'کفش و لباس', 'لوازم جانبی', 'سوپرمارکت', 'قبوض', 'شارژ ساختمان', 'کرایه', 'غذا',
+    'آرایشی و بهداشتی', 'طلا', 'آرایشگاه', 'میوه و سبزیجات', 'سفر', 'کافه', 'هزینه‌های خودرو', 'بنزین', 'دارو و درمان', 'اشتراک‌ها', 'سایر'];
+  const SEED = {
+    banks: ['بلوبانک', 'سامان', 'کارآفرین', 'صادرات'],
+    credits: [['اسنپ‌پی اعتباری', 100000000], ['دیجی‌پی اعتباری', 100000000]],   // سقف ۱۰ میلیون تومان = ۱۰۰ میلیون ریال
+    bnpl: ['دیجی‌پی', 'اسنپ‌پی'], lenders: ['بلوبانک'], invest: ['وال‌گلد', 'والکس', 'نوبیتکس', 'کاریزما']
+  };
+  // یک بار برای هر نسخه‌ی داده: فهرست‌های کاربر اضافه می‌شن بدون اینکه چیزی حذف یا بازنویسی بشه
+  function seedLists(s) {
+    if ((s.settings.seedV || 0) >= 4) return;
+    const has = (arr, n) => arr.some(x => (x.name || x) === n);
+    for (const n of SEED.banks) if (!has(s.accounts, n)) s.accounts.push({ id: uid(), kind: 'bank', bank: n, num: '', name: n, balance: null, stamp: '' });
+    for (const [n, lim] of SEED.credits) if (!has(s.accounts, n)) s.accounts.push({ id: uid(), kind: 'credit', name: n, limit: lim, paid: {} });
+    for (const n of SEED.invest) if (!has(s.locations, n)) s.locations.push({ id: uid(), name: n });
+    s.lists = s.lists || {};
+    s.lists.bnpl = [...new Set([...(s.lists.bnpl || []), ...SEED.bnpl])];
+    s.lists.lenders = [...new Set([...(s.lists.lenders || []), ...SEED.lenders])];
+    // دسته‌ها: فهرست کاربر + هر دسته‌ای که قبلاً واقعاً استفاده شده
+    const used = new Set(s.tx.filter(t => t.type === 'expense' && t.cat).map(t => t.cat).concat(s.loans.map(l => l.cat), s.fixed.map(f => f.cat)).filter(Boolean));
+    s.categories.expense = [...new Set([...EXPENSE_CATS, ...[...used].filter(c => !EXPENSE_CATS.includes(c) && !['قسط وام', 'پرداخت ماهانه'].includes(c))])];
+    s.settings.seedV = 4;
+  }
   function defaults() {
     return {
       v: 2,
       settings: { unit: 'toman', expectedIncome: 0, lastBackup: null, lens: 'toman', barAdj: 0, lock: null },
       categories: {
-        expense: ['سوپرمارکت', 'رستوران و کافه', 'حمل‌ونقل', 'قبض و شارژ', 'خرید', 'سلامت', 'تفریح', 'هدیه', 'خانه', 'سایر'],
+        expense: EXPENSE_CATS.slice(),
         income: ['حقوق', 'پروژه', 'سایر درآمد']
       },
       accounts: [], tx: [], loans: [], fixed: [], debts: [], lastCat: {},
-      incomes: [], locations: [], prices: [], ops: [], goals: []
+      incomes: [], locations: [], prices: [], ops: [], goals: [], lists: {}
     };
   }
   function normalize(d) {
@@ -61,6 +83,9 @@
     s.incomes.forEach(f => { f.paid = f.paid || {}; });
     s.debts.forEach(x => { x.settles = x.settles || []; });
     s.lastCat = s.lastCat || {};
+    s.lists = s.lists && typeof s.lists === 'object' ? s.lists : {};
+    s.accounts.forEach(a => { if (!a.kind) a.kind = 'bank'; if (a.kind === 'credit') a.paid = a.paid || {}; });
+    seedLists(s);
     return s;
   }
   let S;
@@ -144,11 +169,11 @@
   const readInt = el => Number(C.normDigits(el.value).replace(/\D/g, '').slice(0, 6)) || 0;
 
   // ---------- تعهدات ----------
-  const findOb = (kind, id) => (kind === 'loan' ? S.loans : kind === 'income' ? S.incomes : S.fixed).find(x => x.id === id);
+  const findOb = (kind, id) => (kind === 'loan' ? S.loans : kind === 'income' ? S.incomes : kind === 'credit' ? S.accounts : S.fixed).find(x => x.id === id);
   function getOb(kind, id, key) {
     const rec = findOb(kind, id); if (!rec) return null;
     const month = kind === 'loan' ? ym(C.loanDue(rec, +key)) : key;
-    const list = kind === 'income' ? C.incomesForMonth(S, month) : C.obligationsForMonth(S, month);
+    const list = kind === 'income' ? C.incomesForMonth(S, month) : kind === 'credit' ? creditItemsForMonth(month) : C.obligationsForMonth(S, month);
     return list.find(o => o.kind === kind && o.id === id && o.key === String(key)) || null;
   }
   function markPaid(kind, id, key, info) {
@@ -170,6 +195,7 @@
   };
   const obDefaultCat = (kind, id) => (findOb(kind, id) || {}).cat || (kind === 'loan' ? 'قسط وام' : kind === 'income' ? 'حقوق' : 'پرداخت ماهانه');
   const isInc = kind => kind === 'income';
+  const txTypeFor = kind => kind === 'income' ? 'income' : kind === 'credit' ? 'transfer' : 'expense';
 
   // ---------- بدهی و طلب ----------
   const debtLeft = d => d.amount - (d.settles || []).reduce((s, x) => s + x.amount, 0);
@@ -182,13 +208,47 @@
   const debtTitle = d => (d.dir === 'owe' ? 'بدهکار به ' : 'طلبکار از ') + d.person;
 
   // ---------- حساب‌ها ----------
+  // نام بانک پیامک («بلو»، «بانک سامان»…) به حساب‌های تعریف‌شده وصل می‌شه
+  const bankKey = n => String(n || '').replace(/بانک|bank/gi, '').replace(/[\s\u200c]/g, '');
   function accountFor(bank, num) {
-    let a = S.accounts.find(x => x.bank === bank && (x.num || '') === (num || ''));
-    if (!a) { a = { id: uid(), bank, num: num || '', name: bank + (num ? ' ' + num : ''), balance: null, stamp: '' }; S.accounts.push(a); }
+    const banks = S.accounts.filter(x => x.kind !== 'credit');
+    let a = banks.find(x => x.bank === bank && (x.num || '') === (num || ''));
+    if (!a) {
+      const k = bankKey(bank);
+      a = k && banks.find(x => { const xk = bankKey(x.bank || x.name); return xk && (xk === k || xk.startsWith(k) || k.startsWith(xk)) && (!x.num || !num || x.num === num); });
+      if (a && num && !a.num) a.num = num;
+    }
+    if (!a) { a = { id: uid(), kind: 'bank', bank, num: num || '', name: bank + (num ? ' ' + num : ''), balance: null, stamp: '' }; S.accounts.push(a); }
     return a;
   }
+  const bankAccounts = () => S.accounts.filter(a => a.kind !== 'credit');
+  const creditAccounts = () => S.accounts.filter(a => a.kind === 'credit');
+  const bankTotal = () => bankAccounts().reduce((s, a) => s + (a.balance > 0 ? a.balance : 0), 0);
+  // صورت‌حساب اعتبار خرید: جمع خریدهای اعتباری هر ماه، سررسید روز آخر همون ماه
+  function creditItemsForMonth(ymStr, txMap) {
+    txMap = txMap || C.txAmountMap(S);
+    const [y, m] = ymStr.split('/').map(Number), last = C.jStr(y, m, C.monthLen(y, m)), out = [];
+    for (const a of creditAccounts()) {
+      const spent = S.tx.filter(t => t.type === 'expense' && t.account === a.id && ym(t.date) === ymStr).reduce((s, t) => s + t.amount, 0);
+      const info = a.paid && a.paid[ymStr];
+      if (!spent && !info) continue;
+      const paidAmt = info && info.txId && txMap.has(info.txId) ? txMap.get(info.txId) : spent;
+      out.push({ kind: 'credit', id: a.id, key: ymStr, name: `صورت‌حساب ${a.name}`, sub: 'اعتبار خرید، تسویه آخر ماه',
+        estimate: spent, amount: info ? paidAmt : spent, due: last, paid: !!info, variable: false });
+    }
+    return out;
+  }
+  // اعتبار مصرف‌شده: صورت‌حساب‌های تسویه‌نشده‌ی همه‌ی ماه‌ها
+  function creditUsed(a) {
+    const months = [...new Set(S.tx.filter(t => t.type === 'expense' && t.account === a.id).map(t => ym(t.date)))];
+    return months.filter(m => !(a.paid && a.paid[m])).reduce((s, m) => s + S.tx.filter(t => t.type === 'expense' && t.account === a.id && ym(t.date) === m).reduce((x, t) => x + t.amount, 0), 0);
+  }
+  const creditUsedTotal = () => creditAccounts().reduce((s, a) => s + creditUsed(a), 0);
   const accName = id => (S.accounts.find(a => a.id === id) || {}).name || '';
-  const accOptions = sel => `<option value="">بدون حساب</option>` + S.accounts.map(a => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
+  const accOpt = (a, sel) => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}</option>`;
+  const accOptions = (sel, withCredit) => `<option value="">بدون حساب</option><optgroup label="حساب بانکی">${bankAccounts().map(a => accOpt(a, sel)).join('')}</optgroup>`
+    + (withCredit && creditAccounts().length ? `<optgroup label="اعتبار خرید (تسویه آخر ماه)">${creditAccounts().map(a => accOpt(a, sel)).join('')}</optgroup>` : '')
+    + `<option value="__newbank">+ حساب بانکی جدید…</option>`;
 
   // ---------- UI عمومی ----------
   let toastTimer;
@@ -281,6 +341,18 @@
     go((e.state && e.state.tab) || 'home', false);
   });
 
+  function accountsCard() {
+    const banks = bankAccounts(), creds = creditAccounts();
+    if (!banks.length && !creds.length) return '';
+    const known = banks.filter(a => a.balance !== null && a.balance !== undefined);
+    return `<section class="block"><div class="block-head"><h2>حساب‌ها</h2><button class="linkbtn" data-act="goset">ویرایش موجودی</button></div><ul class="accs">
+      ${known.length ? `<li class="acc-total"><span>موجودی بانک‌ها</span><b>${money(bankTotal())}</b></li>` : ''}
+      ${banks.map(a => `<li><span>${esc(a.name)}</span><b>${a.balance === null || a.balance === undefined ? '—' : money(a.balance)}</b>${a.stamp ? `<em>طبق آخرین پیامک، ${dateTitle(a.stamp.slice(0, 10))}</em>` : a.balance === null || a.balance === undefined ? '<em>موجودی ثبت نشده</em>' : ''}</li>`).join('')}
+      ${creds.map(a => { const u = creditUsed(a), lim = a.limit || 0, pct = lim ? Math.min(100, u / lim * 100) : 0;
+        return `<li class="credit"><span>${esc(a.name)}</span><b>${money(Math.max(0, lim - u))} <small>مانده</small></b>
+          <em>${money(u, false)} از ${money(lim, false)} استفاده شده</em><i class="cmeter"><i style="width:${pct}%"></i></i></li>`; }).join('')}
+    </ul></section>`;
+  }
   const headerTools = () => `<div class="hdr-tools"><button class="iconbtn gear" data-tab="rep" aria-label="گزارش مالی">${IC.chart}</button><button class="iconbtn gear" data-act="goset" aria-label="تنظیمات">${IC.gear}</button></div>`;
   const backBtn = () => `<button class="iconbtn gear" data-act="back" aria-label="برگشت">${IC.right}</button>`;
   function obRow(o) {
@@ -320,8 +392,9 @@
     const pct = st.obTotal ? Math.round(st.obPaid / st.obTotal * 100) : 0;
     const byDue = (a, b) => a.due.localeCompare(b.due);
     const heroV = st.count ? st.obRemaining : st.hasIncome ? Math.abs(st.free) : 0;
-    const unpaidList = overdue.concat(st.obs.filter(o => !o.paid), st.inc.filter(i => !i.paid)).sort(byDue);
-    const paidList = st.obs.filter(o => o.paid).concat(st.inc.filter(i => i.paid)).sort(byDue);
+    const cred = creditItemsForMonth(C.addYm(cur, -1)).filter(c => !c.paid).concat(creditItemsForMonth(cur));
+    const unpaidList = overdue.concat(st.obs.filter(o => !o.paid), st.inc.filter(i => !i.paid), cred.filter(c => !c.paid)).sort(byDue);
+    const paidList = st.obs.filter(o => o.paid).concat(st.inc.filter(i => i.paid), cred.filter(c => c.paid)).sort(byDue);
     const { y: yy, m: mm, d: dd } = C.jParse(t), daysLeft = C.monthLen(yy, mm) - dd + 1;
     const recent = S.tx.slice().sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')) || (b.created || 0) - (a.created || 0)).slice(0, 4);
     const backupDays = S.settings.lastBackup ? Math.floor((Date.now() - S.settings.lastBackup) / 864e5) : null;
@@ -371,9 +444,8 @@
       <button class="sum" data-act="goloan"><span>مانده‌ی وام‌ها</span><b>${money(totalLoanDebt, false)}</b></button>
       <button class="sum" data-act="godebt"><span>بدهی به اشخاص</span><b class="${owe ? 'neg' : ''}">${money(owe, false)}</b></button>
       <button class="sum" data-act="godebt"><span>طلب از اشخاص</span><b class="${owed ? 'pos' : ''}">${money(owed, false)}</b></button></div></section>` : ''}
-    ${S.accounts.length ? `<section class="block"><h2>موجودی حساب‌ها</h2><ul class="accs">${S.accounts.map(a => `
-      <li><span>${esc(a.name)}</span><b>${a.balance === null ? '—' : money(a.balance)}</b>${a.stamp ? `<em>طبق آخرین پیامک، ${dateTitle(a.stamp.slice(0, 10))}</em>` : ''}</li>`).join('')}</ul></section>` : ''}
-    ${!st.hasIncome ? `<p class="footnote">درآمد صفر در نظر گرفته شده. اگه واریزی به‌عنوان درآمد ثبت کنی، «پول آزاد» هم حساب می‌شه.</p>` : ''}
+    ${accountsCard()}
+    ${!st.hasIncome ? `<p class="footnote">درآمدی برای این ماه ثبت نشده. حقوق یا درآمد ثابتت رو از دکمه‌ی + اضافه کن تا «مانده برای خرج» حساب بشه.</p>` : ''}
     `;
   }
 
@@ -440,7 +512,7 @@
     const loanCard = l => {
       const s = C.loanSummary(l); const pct = Math.round(s.paidCount / l.count * 100);
       return `<li><button class="card loan" data-act="loan" data-id="${esc(l.id)}">
-        <div class="lc-top"><strong>${esc(l.name)}</strong><span>${esc(l.lender || '')}</span></div>
+        <div class="lc-top"><strong>${esc(l.name)}</strong><span>${esc([l.lender, l.store].filter(x => x && !l.name.includes(x)).join('، '))}</span></div>
         <div class="meter light" aria-hidden="true"><i style="width:${pct}%"></i></div>
         <div class="lc-grid">
           <div><span>قسط ماهانه</span><b>${money(l.amount, false)}</b></div>
@@ -448,7 +520,8 @@
           <div><span>مانده‌ی بدهی</span><b>${money(s.remainingAmount, false)}</b></div>
           <div><span>${s.next ? 'قسط بعدی' : 'وضعیت'}</span><b class="${s.next && s.next.due < today() ? 'neg' : ''}">${s.next ? dateTitle(s.next.due) : 'تسویه شد'}</b></div>
         </div>
-        ${s.remainingCount ? `<p class="lc-end">آخرین قسط: ${dateFull(s.last)}</p>` : ''}
+        ${s.remainingCount ? `<p class="lc-end">آخرین قسط: ${dateFull(s.last)}${l.restDay ? `، اقساط روز ${faDigits(l.restDay)} هر ماه` : ''}</p>` : ''}
+        ${l.restDay ? `<span class="tag info">خرید قسطی</span>` : ''}
       </button></li>`;
     };
     const activeL = S.loans.filter(l => C.loanSummary(l).remainingCount > 0), doneL = S.loans.filter(l => C.loanSummary(l).remainingCount <= 0);
@@ -770,6 +843,9 @@
     </section>`;
   }
 
+  const listEditor = (key, title, note) => `<section class="block card-block"><h2>${title}</h2><p class="note">${note}</p>
+    <div class="chips wrap">${(S.lists[key] || []).map((n, i) => `<span class="chip tag">${esc(n)}<button data-act="dellist" data-key="${key}" data-i="${i}" aria-label="حذف ${esc(n)}">${IC.x}</button></span>`).join('')}</div>
+    <div class="addcat"><input id="newlist-${key}" placeholder="مورد جدید" aria-label="${title}: مورد جدید"><button class="btn small" data-act="addlist" data-key="${key}">افزودن</button></div></section>`;
   function setView() {
     const chipsFor = type => S.categories[type].map((c, i) => `<span class="chip tag">${esc(c)}<button data-act="delcat" data-type="${type}" data-i="${i}" aria-label="حذف ${esc(c)}">${IC.x}</button></span>`).join('');
     const days = S.settings.lastBackup ? Math.floor((Date.now() - S.settings.lastBackup) / 864e5) : null;
@@ -788,8 +864,26 @@
       <div class="addcat"><input id="newcat-expense" placeholder="دسته‌ی جدید" aria-label="دسته‌ی خرج جدید"><button class="btn small" data-act="addcat" data-type="expense">افزودن</button></div></section>
     <section class="block card-block"><h2>دسته‌های درآمد</h2><div class="chips wrap">${chipsFor('income')}</div>
       <div class="addcat"><input id="newcat-income" placeholder="دسته‌ی جدید" aria-label="دسته‌ی درآمد جدید"><button class="btn small" data-act="addcat" data-type="income">افزودن</button></div></section>
-    ${S.accounts.length ? `<section class="block card-block"><h2>حساب‌ها</h2><ul class="accs edit">${S.accounts.map(a => `<li><input data-accname="${esc(a.id)}" value="${esc(a.name)}" aria-label="نام حساب"><button class="btn small ghost" data-act="delacc" data-id="${esc(a.id)}">حذف</button></li>`).join('')}</ul>
-      <button class="btn small" data-act="saveacc">ذخیره‌ی نام‌ها</button></section>` : ''}
+    <section class="block card-block"><h2>حساب‌های بانکی</h2>
+      <p class="note">موجودی هر حساب جزو دارایی‌های ریالی و ارزش خالص حساب می‌شه. با چسباندن پیامک بانک خودکار به‌روز می‌شه؛ اینجا هم می‌تونی دستی واردش کنی.</p>
+      <ul class="listed">${bankAccounts().map(a => `<li><input data-accname="${esc(a.id)}" value="${esc(a.name)}" aria-label="نام حساب">
+        <div class="unitwrap sm"><input class="amt" data-accbal="${esc(a.id)}" inputmode="numeric" value="${a.balance !== null && a.balance !== undefined ? faNum(disp(a.balance)) : ''}" placeholder="موجودی" aria-label="موجودی ${esc(a.name)}"><span>${unitLabel()}</span></div>
+        <button class="iconbtn sm" data-act="delacc" data-id="${esc(a.id)}" aria-label="حذف ${esc(a.name)}">${IC.x}</button></li>`).join('')}</ul>
+      <div class="addcat"><input id="newbank" placeholder="بانک جدید" aria-label="بانک جدید"><button class="btn small" data-act="addbank">افزودن</button></div>
+      <button class="btn small" data-act="saveacc">ذخیره‌ی نام‌ها و موجودی‌ها</button></section>
+    <section class="block card-block"><h2>اعتبار خرید (تسویه آخر ماه)</h2>
+      <p class="note">خریدی که با این اعتبارها ثبت کنی خرج همون روزه؛ آخر ماه صورت‌حسابش در «پیش رو» میاد و تسویه‌ش به‌صورت انتقال ثبت می‌شه تا دوبار خرج حساب نشه.</p>
+      <ul class="listed">${creditAccounts().map(a => `<li><input data-accname="${esc(a.id)}" value="${esc(a.name)}" aria-label="نام اعتبار">
+        <div class="unitwrap sm"><input class="amt" data-acclim="${esc(a.id)}" inputmode="numeric" value="${a.limit ? faNum(disp(a.limit)) : ''}" placeholder="سقف" aria-label="سقف ${esc(a.name)}"><span>سقف</span></div>
+        <button class="iconbtn sm" data-act="delacc" data-id="${esc(a.id)}" aria-label="حذف ${esc(a.name)}">${IC.x}</button></li>`).join('')}</ul>
+      <div class="addcat"><input id="newcredit" placeholder="اعتبار جدید" aria-label="اعتبار جدید"><button class="btn small" data-act="addcredit">افزودن</button></div>
+      <button class="btn small" data-act="saveacc">ذخیره</button></section>
+    ${listEditor('bnpl', 'پلتفرم‌های خرید قسطی', 'توی فرم خرید قسطی به‌عنوان «پلتفرم» پیشنهاد می‌شن.')}
+    ${listEditor('lenders', 'وام‌دهنده‌ها', 'توی فرم وام بانکی به‌عنوان «وام‌دهنده» پیشنهاد می‌شن.')}
+    <section class="block card-block"><h2>خرید قسطی (اسنپ‌پی، دیجی‌پی…)</h2>
+      <p class="note">قسط اول روز خرید پرداخت می‌شه و اقساط بعدی روز ثابتی از ماه‌های بعد. معمولاً روز ۱. این عدد برای خریدهای قسطی جدید پیش‌فرض می‌شه و توی فرم هر خرید قابل تغییره.</p>
+      <div class="unitwrap"><input id="bnplday" inputmode="numeric" value="${faDigits(bnplDay())}" aria-label="روز سررسید اقساط بعدی"><span>روز ماه</span></div>
+      <button class="btn small" data-act="savebnpl">ذخیره</button></section>
     ${window.Inv ? window.Inv.settingsHtml() : ''}
     <section class="block card-block"><h2>قفل</h2>
       <p class="note">${S.settings.lock ? 'قفل روشنه. اپ موقع باز شدن و بعد از یک دقیقه دور بودن، رمز می‌خواد.' : 'با یه رمز عددی، اپ موقع باز شدن قفل می‌شه تا کسی که گوشیت دستشه اطلاعات مالیت رو نبینه.'}</p>
@@ -860,9 +954,19 @@
     shirt: '<path d="M8 4 4 7l2 3 2-1v11h8V9l2 1 2-3-4-3a4 4 0 0 1-8 0z"/>', coin: '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/>',
     swap: '<path d="M7 7h11l-3-3M17 17H6l3 3"/>'
   };
+  Object.assign(CI, {
+    building: '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M11 21v-3h2v3"/>',
+    fuel: '<path d="M5 20V5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v15M4 20h11M5 10h9M14 8l3 3v6a1.5 1.5 0 0 0 3 0V9l-2-2"/>',
+    leaf: '<path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14zM5 19l7-7"/>', plane: '<path d="M10 14 3 11l1-2 8 1 5-6 2 1-3 7 5 3-1 2-6-2-3 5-2-1z"/>',
+    scissors: '<circle cx="6" cy="7" r="2.5"/><circle cx="6" cy="17" r="2.5"/><path d="M8 8.5 20 18M8 15.5 20 6"/>', repeat: '<path d="M4 12a7 7 0 0 1 12-5l2 2M20 12a7 7 0 0 1-12 5l-2-2M18 4v5h-5M6 20v-5h5"/>',
+    headset: '<path d="M4 14v-2a8 8 0 0 1 16 0v2M4 14h3v5H4zM17 14h3v5h-3z"/>', pill: '<rect x="3" y="9" width="18" height="7" rx="3.5" transform="rotate(-35 12 12.5)"/><path d="M9 8l6 9"/>'
+  });
   const CAT_MAP = [
+    [/شارژ\s*ساختمان|ساختمان/, 'building', 90], [/بنزین|سوخت/, 'fuel', 15], [/میوه|سبزی/, 'leaf', 120], [/سفر/, 'plane', 195],
+    [/آرایشگاه/, 'scissors', 310], [/اشتراک/, 'repeat', 265], [/لوازم\s*جانبی/, 'headset', 240], [/دارو|درمان/, 'pill', 350],
+    [/^قسط$/, 'bank', 225], [/خرید\s*منزل/, 'home', 100], [/کفش/, 'shirt', 260], [/خودرو/, 'car', 210], [/^غذا$/, 'cup', 25],
     [/سوپر|خوراک|خواربار|میوه|نان/, 'cart', 150], [/رستوران|کافه|غذا|فست/, 'cup', 25], [/حمل|تاکسی|اسنپ|تپسی|کرایه|بنزین|سوخت|ماشین/, 'car', 210],
-    [/قبض|شارژ|برق|آب|گاز/, 'bolt', 45], [/خرید|کیف|لوازم/, 'bag', 280], [/سلامت|دارو|پزشک|دکتر|بیمه/, 'heart', 350],
+    [/قبض|قبوض|شارژ|برق|آب|گاز/, 'bolt', 45], [/خرید|کیف|لوازم/, 'bag', 280], [/سلامت|دارو|پزشک|دکتر|بیمه/, 'heart', 350],
     [/تفریح|سینما|سفر|بازی/, 'ticket', 320], [/هدیه|کادو/, 'gift', 330], [/خانه|اجاره|منزل/, 'home', 100], [/حقوق|دستمزد/, 'work', 140],
     [/پروژه|فریلنس/, 'pen', 190], [/وام|قسط|بانک/, 'bank', 225], [/تلفن|نت|اینترنت|ایرانسل|همراه/, 'phone', 200],
     [/آرایش|زیبایی|آرایشگاه/, 'spark', 300], [/لباس|پوشاک/, 'shirt', 260], [/طلا|سکه|سرمایه/, 'coin', 42], [/درآمد/, 'plus', 140], [/^سایر/, 'dots', 220]
@@ -921,7 +1025,7 @@
       <div id="catwrap" ${type === 'transfer' ? 'hidden' : ''}><label class="lbl">دسته</label><div class="catgrid" id="cats">${catChips(catType(), cat)}</div></div>
       <div id="linkwrap" ${type === 'expense' ? '' : 'hidden'}><label class="lbl" for="link">مربوط به قسط یا قبض؟</label><select id="link">${linkOptions(t && t.link && t.link.kind !== 'income' ? t.link : null)}</select></div>
       <div id="inclinkwrap" ${type === 'income' && S.incomes.length ? '' : 'hidden'}><label class="lbl" for="inclink">مربوط به درآمد ثابت؟</label><select id="inclink">${incLinkOptions(t && t.link && t.link.kind === 'income' ? t.link : null)}</select></div>
-      <label class="lbl" for="acc">حساب</label><select id="acc">${accOptions(data.account)}</select>
+      <label class="lbl" for="acc">حساب یا اعتبار</label><select id="acc">${accOptions(data.account, type === 'expense')}</select>
       <label class="lbl" for="note">توضیح</label><input id="note" value="${esc(data.note)}" placeholder="${type === 'income' ? 'مثلاً حقوق مهر' : 'مثلاً خرید هفتگی'}">
       <div class="btnrow"><button class="btn wide" id="savetx">${t ? 'ذخیره‌ی تغییرات' : 'ثبت'}</button>${t ? `<button class="btn danger" id="deltx">حذف</button>` : ''}</div>`;
     openSheet(typeTitle(t, type), html, ov => {
@@ -934,6 +1038,7 @@
         $('.tnote', ov).hidden = type !== 'transfer';
         $('#note', ov).placeholder = type === 'income' ? 'مثلاً حقوق مهر' : type === 'transfer' ? 'مثلاً از خاورمیانه به بلو' : 'مثلاً خرید هفتگی';
         $('.sheet-head h2', ov).textContent = typeTitle(t, type);
+        const accSel = $('#acc', ov), keep = accSel.value; accSel.innerHTML = accOptions(keep, type === 'expense'); if ([...accSel.options].some(o => o.value === keep)) accSel.value = keep;
       });
       $('#cats', ov).addEventListener('click', e => {
         const b = e.target.closest('[data-cat]'); if (!b) return;
@@ -943,6 +1048,11 @@
       once($('#savetx', ov), () => {
         const amount = readAmount(ov, 'amount');
         if (!amount) { toast('مبلغ رو وارد کن.', 'bad'); return false; }
+        const cacc = type === 'expense' && S.accounts.find(a => a.id === $('#acc', ov).value && a.kind === 'credit');
+        if (cacc && cacc.limit) {
+          const used = creditUsed(cacc) - (t && t.account === cacc.id && t.type === 'expense' ? t.amount : 0);
+          if (used + amount > cacc.limit && !confirm(`با این خرید از سقف ${cacc.name} (${money(cacc.limit)}) بیشتر می‌شه. باز هم ثبت بشه؟`)) return false;
+        }
         const rec = t || { id: uid(), created: Date.now() };
         const oldLink = t && t.link ? { ...t.link } : null;
         Object.assign(rec, { type, amount, date: readDate(ov, 'date'), time: data.time || '', cat: type === 'transfer' ? '' : cat,
@@ -1038,8 +1148,8 @@
   function quickPay(kind, id, key) {
     const o = getOb(kind, id, key); if (!o || o.paid) return;
     if (o.variable) { openPay(kind, id, key); return; }
-    const t = { id: uid(), created: Date.now(), type: isInc(kind) ? 'income' : 'expense', amount: o.estimate, date: today(), time: '', cat: obDefaultCat(kind, id),
-      account: (findOb(kind, id) || {}).account || '', note: `${o.name}، ${o.sub}`, link: { kind, id, key: String(key) }, auto: true };
+    const t = { id: uid(), created: Date.now(), type: txTypeFor(kind), amount: o.estimate, date: today(), time: '', cat: kind === 'credit' ? '' : obDefaultCat(kind, id),
+      account: kind === 'credit' ? '' : (findOb(kind, id) || {}).account || '', note: kind === 'credit' ? `تسویه‌ی ${o.name.replace('صورت‌حساب ', '')}، ${monthTitle(key)}` : `${o.name}، ${o.sub}`, link: { kind, id, key: String(key) }, auto: true };
     S.tx.push(t); markPaid(kind, id, key, { date: t.date, txId: t.id });
     save(); refreshSheets(); render();
     toast(`${o.name}: ${money(o.estimate)} ${isInc(kind) ? 'دریافت شد' : 'پرداخت شد'}.`, '', { label: 'برگرداندن', fn: () => { unmarkPaid(kind, id, key); save(); refreshSheets(); render(); } });
@@ -1054,7 +1164,7 @@
   function openPay(kind, id, key) {
     const o = getOb(kind, id, key); if (!o) return;
     if (o.paid) { askUnpay(kind, id, key); return; }
-    const inc = isInc(kind), ttype = inc ? 'income' : 'expense';
+    const inc = isInc(kind), ttype = txTypeFor(kind);
     const recent = S.tx.filter(t => t.type === ttype && !t.link && Math.abs(C.diffDays(t.date, today())) <= 45)
       .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 25);
     const html = `
@@ -1081,7 +1191,7 @@
           else markPaid(kind, id, key, { date: today() });
         } else {
           const amount = readAmount(ov, 'amount'); if (!amount) { toast('مبلغ رو وارد کن.', 'bad'); return false; }
-          const tt = { id: uid(), created: Date.now(), type: ttype, amount, date: readDate(ov, 'date'), time: '', cat: obDefaultCat(kind, id),
+          const tt = { id: uid(), created: Date.now(), type: ttype, amount, date: readDate(ov, 'date'), time: '', cat: kind === 'credit' ? '' : obDefaultCat(kind, id),
             account: $('#acc', ov).value, note: `${o.name}، ${o.sub.replace('، پیش‌بینی', '')}`, link: { kind, id, key: String(key) }, auto: true };
           S.tx.push(tt); markPaid(kind, id, key, { date: tt.date, txId: tt.id });
         }
@@ -1091,30 +1201,88 @@
   }
 
   // ---------- وام ----------
+  // نوع اقساط: وام بانکی (هر ماه همون روز) یا خرید قسطی (قسط اول روز خرید، بقیه روز ثابتی از ماه‌های بعد)
+  const BNPL_RE = /(اسنپ\s*‌?\s*پی|دیجی\s*‌?\s*پی|تارا|ازکی|لندو|قسطی|bnpl|snapp\s*pay|digi\s*pay)/i;
+  const bnplDay = () => S.settings.bnplDay || 1;
+  // یک فهرست با دو گروه؛ گروه نوعِ فعلی اول. انتخاب از گروه دیگه، نوع رو عوض می‌کنه.
+  const lenderOptions = (list, sel) => {
+    const grp = (k, label) => { const items = (S.lists[k] || []).slice(); if (k === list && sel && !items.includes(sel) && !(S.lists.bnpl || []).concat(S.lists.lenders || []).includes(sel)) items.unshift(sel);
+      return items.length ? `<optgroup label="${label}">${items.map(n => `<option ${n === sel ? 'selected' : ''}>${esc(n)}</option>`).join('')}</optgroup>` : ''; };
+    const order = list === 'bnpl' ? [['bnpl', 'پلتفرم خرید قسطی'], ['lenders', 'وام‌دهنده']] : [['lenders', 'وام‌دهنده'], ['bnpl', 'پلتفرم خرید قسطی']];
+    return `<option value="">— انتخاب کن —</option>` + order.map(([k, l]) => grp(k, l)).join('') + `<option value="__newlender">+ مورد جدید…</option>`;
+  };
   function openLoanForm(id) {
     const l = id ? S.loans.find(x => x.id === id) : null;
+    let type = l ? (l.restDay ? 'bnpl' : 'bank') : 'bank', typeTouched = !!l;
     const html = `
-      <label class="lbl" for="lname">نام وام یا خرید قسطی</label><input id="lname" value="${esc(l ? l.name : '')}" placeholder="مثلاً وام مسکن یا اسنپ پی لباس">
-      <label class="lbl" for="llender">بانک یا سرویس</label><input id="llender" value="${esc(l ? l.lender : '')}" placeholder="اختیاری">
+      <div class="chips seg" id="ltype" role="group" aria-label="نوع اقساط">${[['bank', 'وام بانکی'], ['bnpl', 'خرید قسطی (اسنپ‌پی، دیجی‌پی…)']].map(([k, n]) => `<button type="button" class="chip ${type === k ? 'on' : ''}" data-t="${k}" aria-pressed="${type === k}">${n}</button>`).join('')}</div>
+      <label class="lbl" for="llender" id="llenderlbl">وام‌دهنده</label><select id="llender" data-list="${type === 'bnpl' ? 'bnpl' : 'lenders'}">${lenderOptions(type === 'bnpl' ? 'bnpl' : 'lenders', l ? l.lender : '')}</select>
+      <div id="storewrap"><label class="lbl" for="lstore">فروشگاه</label><input id="lstore" value="${esc(l && l.store ? l.store : '')}" placeholder="مثلاً دیجی‌کالا یا فروشگاه موبایل"></div>
+      <label class="lbl" for="lname">نام <span class="was">(اختیاری برای خرید قسطی)</span></label><input id="lname" value="${esc(l ? l.name : '')}" placeholder="مثلاً وام مسکن یا گوشی جدید">
       <label class="lbl">مبلغ هر قسط</label>${amountInput('lamount', l ? l.amount : 0)}
-      <label class="lbl" for="lcount">تعداد کل اقساط</label><input id="lcount" inputmode="numeric" value="${l ? faDigits(l.count) : ''}" placeholder="مثلاً ۱۲">
-      <label class="lbl">تاریخ سررسید اولین قسط</label>${dateField('lfirst', l ? l.first : today())}
-      <p class="note">اقساط بعدی هر ماه همین روز سررسید دارن؛ اگه ماهی این روز رو نداشت، آخرین روز همون ماه حساب می‌شه.</p>
+      <label class="lbl" for="lcount">تعداد کل اقساط</label><input id="lcount" inputmode="numeric" value="${l ? faDigits(l.count) : ''}" placeholder="مثلاً ۴">
+      <label class="lbl" id="lfirstlbl">تاریخ</label>${dateField('lfirst', l ? l.first : today())}
+      <div id="restwrap"><label class="lbl" for="lrest">اقساط بعدی روز چندم ماه‌ان؟</label><input id="lrest" inputmode="numeric" value="${faDigits(l && l.restDay ? l.restDay : bnplDay())}"></div>
+      <p class="summary" id="lprev" aria-live="polite"></p>
       <label class="lbl" for="lcat">دسته‌ی خرج</label><select id="lcat">${withSel(['وام', ...S.categories.expense.filter(c => c !== 'وام')], l && l.cat).map(c => `<option ${c === ((l && l.cat) || 'وام') ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-      ${!l ? `<label class="lbl" for="lpaid">چند قسط تا حالا پرداخت شده؟</label><input id="lpaid" inputmode="numeric" placeholder="۰">` : ''}
+      ${!l ? `<label class="lbl" for="lpaid">چند قسط تا حالا پرداخت شده؟</label><input id="lpaid" inputmode="numeric" placeholder="۰">
+        <label class="check" id="firsttxwrap"><input type="checkbox" id="firsttx"> برداشت قسط اول (روز خرید) رو هم در تراکنش‌ها ثبت کن</label>` : ''}
       <div class="btnrow"><button class="btn wide" id="lsave">${l ? 'ذخیره‌ی تغییرات' : 'افزودن'}</button>${l ? `<button class="btn danger" id="ldel">حذف</button>` : ''}</div>`;
-    openSheet(l ? 'ویرایش وام' : 'وام یا خرید قسطی جدید', html, ov => {
+    openSheet(l ? `ویرایش ${l.name}` : 'وام یا خرید قسطی جدید', html, ov => {
+      const draft = () => ({ first: readDate(ov, 'lfirst'), count: Math.min(600, readInt($('#lcount', ov)) || 0), restDay: type === 'bnpl' ? Math.min(31, Math.max(1, readInt($('#lrest', ov)) || 1)) : undefined });
+      const sync = () => {
+        $$('#ltype .chip', ov).forEach(c => { c.classList.toggle('on', c.dataset.t === type); c.setAttribute('aria-pressed', c.dataset.t === type); });
+        $('#lfirstlbl', ov).textContent = type === 'bnpl' ? 'تاریخ خرید (قسط اول همون روزه)' : 'تاریخ سررسید اولین قسط';
+        $('#restwrap', ov).hidden = type !== 'bnpl'; $('#storewrap', ov).hidden = type !== 'bnpl';
+        const ls = $('#llender', ov), want = type === 'bnpl' ? 'bnpl' : 'lenders';
+        if (ls.dataset.list !== want) { const keep = ls.value; ls.dataset.list = want; ls.innerHTML = lenderOptions(want, keep === '__newlender' ? '' : keep); }
+        $('#llenderlbl', ov).textContent = type === 'bnpl' ? 'پلتفرم خرید قسطی' : 'وام‌دهنده';
+        if (!l) {
+          $('#firsttxwrap', ov).hidden = type !== 'bnpl';
+          if (type === 'bnpl' && !$('#lpaid', ov).dataset.touched) $('#lpaid', ov).value = '۱';
+          if (type === 'bank' && !$('#lpaid', ov).dataset.touched) $('#lpaid', ov).value = '';
+          const recent = C.diffDays(readDate(ov, 'lfirst'), today()) <= 7;
+          if (!$('#firsttx', ov).dataset.touched) $('#firsttx', ov).checked = type === 'bnpl' && recent;
+        }
+        const d = draft(), box = $('#lprev', ov);
+        if (!d.count) { box.textContent = type === 'bnpl' ? 'قسط اول روز خرید؛ اقساط بعدی روز ' + faDigits(d.restDay || bnplDay()) + ' ماه‌های بعد.' : 'اقساط بعدی هر ماه همین روز؛ اگه ماهی این روز رو نداشت، آخرین روز همون ماه.'; return; }
+        const r = { ...d }, dates = [];
+        for (let i = 0; i < d.count; i++) dates.push(C.loanDue(r, i));
+        const show = dates.length <= 5 ? dates : dates.slice(0, 3).concat(['…', dates[dates.length - 1]]);
+        box.innerHTML = `<b>تاریخ اقساط:</b> ${show.map(x => x === '…' ? '…' : dateTitle(x)).join('، ')}`;
+      };
+      $('#ltype', ov).addEventListener('click', e => { const b = e.target.closest('[data-t]'); if (!b) return; type = b.dataset.t; typeTouched = true; sync(); });
+      $('#lname', ov).addEventListener('input', e => { if (!typeTouched && BNPL_RE.test(e.target.value) && type !== 'bnpl') { type = 'bnpl'; sync(); } });
+      $('#llender', ov).addEventListener('change', e => {
+        const v = e.target.value;
+        if ((S.lists.bnpl || []).includes(v) && type !== 'bnpl') { type = 'bnpl'; typeTouched = true; sync(); }
+        else if ((S.lists.lenders || []).includes(v) && !(S.lists.bnpl || []).includes(v) && type !== 'bank') { type = 'bank'; typeTouched = true; sync(); }
+      });
+      if (!l) { $('#lpaid', ov).addEventListener('input', e => { e.target.dataset.touched = '1'; }); $('#firsttx', ov).addEventListener('change', e => { e.target.dataset.touched = '1'; }); }
+      ov.addEventListener('input', sync); ov.addEventListener('change', e => { if (e.target.closest('[data-date="lfirst"]') || e.target.id === 'lrest') sync(); });
+      $$('[data-setdate]', ov).forEach(b => b.addEventListener('click', () => setTimeout(sync, 0)));
+      sync();
       once($('#lsave', ov), () => {
-        const name = $('#lname', ov).value.trim(), amount = readAmount(ov, 'lamount'), count = readInt($('#lcount', ov));
-        if (!name || !amount || !count || count > 600) { toast('نام، مبلغ قسط و تعداد اقساط (۱ تا ۶۰۰) لازمه.', 'bad'); return false; }
+        const lender = $('#llender', ov).value === '__newlender' ? '' : $('#llender', ov).value.trim(), store = type === 'bnpl' ? $('#lstore', ov).value.trim().slice(0, 40) : '';
+        const name = ($('#lname', ov).value.trim() || (type === 'bnpl' ? [lender, store].filter(Boolean).join('، ') : '')).slice(0, 60);
+        const amount = readAmount(ov, 'lamount'), count = readInt($('#lcount', ov));
+        if (!name || !amount || !count || count > 600) { toast(type === 'bnpl' ? 'پلتفرم یا نام، مبلغ قسط و تعداد اقساط (۱ تا ۶۰۰) لازمه.' : 'نام، مبلغ قسط و تعداد اقساط (۱ تا ۶۰۰) لازمه.', 'bad'); return false; }
+        const d = draft();
         const rec = l || { id: uid(), paid: {} };
-        Object.assign(rec, { name, lender: $('#llender', ov).value.trim(), amount, count, first: readDate(ov, 'lfirst'), cat: $('#lcat', ov).value });
+        Object.assign(rec, { name, lender, amount, count, first: d.first, cat: $('#lcat', ov).value });
+        if (store) rec.store = store; else delete rec.store;
+        if (d.restDay) rec.restDay = d.restDay; else delete rec.restDay;
         if (!l) {
           const pc = Math.min(count, readInt($('#lpaid', ov)));
           for (let i = 0; i < pc; i++) rec.paid[i] = { date: C.loanDue(rec, i), prior: true };
+          if (type === 'bnpl' && pc >= 1 && $('#firsttx', ov).checked) { // قسط اول روز خرید: برداشتش هم ثبت بشه
+            const t = { id: uid(), created: Date.now(), type: 'expense', amount, date: rec.first, time: '', cat: rec.cat,
+              account: '', note: `${name}، قسط ۱ از ${faDigits(count)}`, link: { kind: 'loan', id: rec.id, key: '0' }, auto: true };
+            S.tx.push(t); rec.paid[0] = { date: rec.first, txId: t.id };
+          }
           S.loans.push(rec);
         } else Object.keys(rec.paid).forEach(k => { if (+k >= count) unmarkPaid('loan', rec.id, k); });
-        save(); closeAll(); obTab = 'loan'; render(); toast(l ? 'ذخیره شد.' : 'اضافه شد.');
+        save(); closeAll(); obTab = 'loan'; if (tab !== 'ob') go('ob'); else render(); toast(l ? 'ذخیره شد.' : `${type === 'bnpl' ? 'خرید قسطی' : 'وام'} اضافه شد.`);
       });
       if (l) $('#ldel', ov).addEventListener('click', () => {
         if (!confirm(`«${l.name}» و سابقه‌ی اقساطش حذف بشه؟ تراکنش‌هایی که ثبت شدن می‌مونن.`)) return;
@@ -1319,9 +1487,9 @@
       const vals = months.map(m => exp.filter(t => ym(t.date) === m && catOf(t) === c).reduce((s, t) => s + t.amount, 0));
       return [c].concat(vals, [vals.reduce((a, b) => a + b, 0)]);
     })), 'خرج هر دسته', [18].concat(months.map(() => 14), [16]));
-    add([['نام', 'بانک/سرویس', 'مبلغ قسط (ریال)', 'تعداد کل', 'پرداخت‌شده', 'باقی‌مانده', 'مانده‌ی بدهی (ریال)', 'اولین قسط', 'آخرین قسط', 'قسط بعدی']]
-      .concat(S.loans.map(l => { const s = C.loanSummary(l); return [l.name, l.lender || '', l.amount, l.count, s.paidCount, s.remainingCount, s.remainingAmount, l.first, s.last, s.next ? s.next.due : 'تسویه']; })),
-      'وام‌ها', [22, 16, 16, 9, 10, 10, 18, 12, 12, 12]);
+    add([['نام', 'نوع', 'بانک/سرویس', 'مبلغ قسط (ریال)', 'تعداد کل', 'پرداخت‌شده', 'باقی‌مانده', 'مانده‌ی بدهی (ریال)', 'اولین قسط', 'آخرین قسط', 'قسط بعدی']]
+      .concat(S.loans.map(l => { const s = C.loanSummary(l); return [l.name, l.restDay ? `خرید قسطی (روز ${l.restDay})` : 'وام بانکی', l.lender || '', l.amount, l.count, s.paidCount, s.remainingCount, s.remainingAmount, l.first, s.last, s.next ? s.next.due : 'تسویه']; })),
+      'وام‌ها', [22, 16, 16, 16, 9, 10, 10, 18, 12, 12, 12]);
     add([['عنوان', 'نوع', 'مبلغ ماهانه/پیش‌بینی (ریال)', 'روز سررسید', 'از ماه', 'تا ماه']].concat(S.fixed.map(f => [f.name, f.variable ? 'متغیر' : 'ثابت', f.amount, f.day, f.start || '', f.end || ''])),
       'پرداخت‌های ماهانه', [26, 8, 22, 11, 10, 10]);
     add([['نوع', 'شخص', 'مبلغ (ریال)', 'تسویه‌شده', 'باقی‌مانده', 'تاریخ', 'موعد', 'توضیح']]
@@ -1509,6 +1677,7 @@
       loan: () => openLoanDetail(id), fixed: () => openFixedForm(id),
       newdebt: () => openDebtForm(null, b.dataset.dir), debtd: () => openDebtDetail(id),
       excel: exportExcel, ics: exportICS, cal: sendToCalendar, backup, goset: () => go('set'),
+      savebnpl: () => { const v = readInt($('#bnplday')); if (!(v >= 1 && v <= 31)) { toast('روز باید بین ۱ تا ۳۱ باشه.', 'bad'); return; } S.settings.bnplDay = v; save(); toast('ذخیره شد.'); },
       back: () => { if (history.state && history.state.tab && history.length > 1) history.back(); else go(prevTab); },
       addhub: openAddHub, newincome: () => openIncomeForm(), income: () => openIncomeForm(id),
       setlock: openSetLock, dellock: () => { if (!confirm('قفل برداشته بشه؟')) return; S.settings.lock = null; save(); render(); toast('قفل برداشته شد.'); },
@@ -1517,14 +1686,39 @@
       addcat: () => { const inp = $('#newcat-' + b.dataset.type); const v = inp.value.trim().slice(0, 40); if (!v) return;
         if (!S.categories[b.dataset.type].includes(v)) S.categories[b.dataset.type].push(v); save(); render(); },
       delcat: () => { S.categories[b.dataset.type].splice(+b.dataset.i, 1); save(); render(); },
-      saveacc: () => { $$('[data-accname]').forEach(i => { const ac = S.accounts.find(x => x.id === i.dataset.accname); if (ac && i.value.trim()) ac.name = i.value.trim(); }); save(); toast('ذخیره شد.'); },
-      delacc: () => { if (!confirm('این حساب حذف بشه؟ تراکنش‌هاش می‌مونن ولی بدون حساب.')) return;
+      saveacc: () => {
+        $$('[data-accname]').forEach(i => { const ac = S.accounts.find(x => x.id === i.dataset.accname); if (ac && i.value.trim()) ac.name = i.value.trim().slice(0, 40); });
+        $$('[data-accbal]').forEach(i => { const ac = S.accounts.find(x => x.id === i.dataset.accbal); if (!ac) return; const v = C.normDigits(i.value).replace(/\D/g, '');
+          const nb = v === '' ? null : toRial(Number(v)); if (nb !== ac.balance) { ac.balance = nb; ac.stamp = ''; } });
+        $$('[data-acclim]').forEach(i => { const ac = S.accounts.find(x => x.id === i.dataset.acclim); if (!ac) return; const v = C.normDigits(i.value).replace(/\D/g, ''); ac.limit = v ? toRial(Number(v)) : 0; });
+        save(); render(); toast('ذخیره شد.'); },
+      addbank: () => { const n = ($('#newbank').value || '').trim().slice(0, 40); if (!n) return; S.accounts.push({ id: uid(), kind: 'bank', bank: n, num: '', name: n, balance: null, stamp: '' }); save(); render(); },
+      addcredit: () => { const n = ($('#newcredit').value || '').trim().slice(0, 40); if (!n) return; S.accounts.push({ id: uid(), kind: 'credit', name: n, limit: 0, paid: {} }); save(); render(); },
+      addlist: () => { const k = b.dataset.key, n = ($('#newlist-' + k).value || '').trim().slice(0, 40); if (!n) return; S.lists[k] = [...new Set([...(S.lists[k] || []), n])]; save(); render(); },
+      dellist: () => { const k = b.dataset.key; (S.lists[k] || []).splice(+b.dataset.i, 1); save(); render(); },
+      delacc: () => { if (!confirm('این حساب حذف بشه؟ تراکنش‌هاش می‌مونن ولی دیگه به حسابی وصل نیستن.')) return;
         S.tx.forEach(t => { if (t.account === id) t.account = ''; }); S.accounts = S.accounts.filter(x => x.id !== id); save(); render(); },
       wipe: () => { if (prompt('برای پاک کردن همه‌چیز، کلمه‌ی «پاک» رو بنویس. این کار برگشت‌پذیر نیست.') !== 'پاک') return;
-        const lock = S.settings.lock; S = defaults(); S.settings.lock = lock; save(); bindInv(); lastHero = null; go('home'); toast('همه‌ی داده‌ها پاک شد.'); }
+        const lock = S.settings.lock; S = normalize(defaults()); S.settings.lock = lock; save(); bindInv(); lastHero = null; go('home'); toast('همه‌ی داده‌ها پاک شد. فهرست بانک‌ها و پلتفرم‌ها دوباره آماده‌ست.'); }
     };
     if (acts[a]) acts[a]();
     else if (window.Inv && window.Inv.acts[a]) window.Inv.acts[a](b, e);
+  });
+  document.addEventListener('change', e => {
+    const sel = e.target;
+    if (sel.tagName === 'SELECT' && sel.value === '__newbank') {
+      const n = (prompt('اسم حساب بانکی جدید:') || '').trim().slice(0, 40);
+      if (!n) { sel.value = ''; return; }
+      const a = { id: uid(), kind: 'bank', bank: n, num: '', name: n, balance: null, stamp: '' }; S.accounts.push(a); save();
+      const credit = [...sel.querySelectorAll('optgroup')].length > 1;
+      sel.innerHTML = accOptions(a.id, credit); sel.value = a.id; toast(`حساب «${n}» اضافه شد.`);
+    }
+    if (sel.tagName === 'SELECT' && sel.value === '__newlender') {
+      const list = sel.dataset.list, n = (prompt(list === 'bnpl' ? 'اسم پلتفرم خرید قسطی:' : 'اسم وام‌دهنده:') || '').trim().slice(0, 40);
+      if (!n) { sel.value = ''; return; }
+      S.lists[list] = [...new Set([...(S.lists[list] || []), n])]; save();
+      sel.innerHTML = lenderOptions(list, n); sel.value = n; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
   });
   document.addEventListener('change', e => { if (e.target.id === 'restore' && e.target.files[0]) { restore(e.target.files[0]); e.target.value = ''; } });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('.overlay')) closeSheet(); });
@@ -1557,7 +1751,7 @@
 
   // ---------- شروع ----------
   // رابط مشترک برای ماژول سرمایه (invest-ui.js)
-  window.App = { save, render: () => render(), go, headerTools: () => headerTools(), catIcon, openSheet, closeSheet, closeAll, toast, once, esc, $, $$, uid, shareFile, today,
+  window.App = { save, render: () => render(), go, headerTools: () => headerTools(), catIcon, bankTotal, creditUsedTotal, bankAccounts, openSheet, closeSheet, closeAll, toast, once, esc, $, $$, uid, shareFile, today,
     get tab() { return tab; }, debtTotals, loanRemaining: () => S.loans.reduce((s, l) => s + C.loanSummary(l).remainingAmount, 0) };
   try { history.replaceState({ tab: 'home' }, ''); } catch (e) { /* */ }
   load(); render(); showLock(); route();

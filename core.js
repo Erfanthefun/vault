@@ -186,7 +186,14 @@
 
   // ---------- تعهدات: اقساط و پرداخت‌های ماهانه ----------
   function txAmountMap(state) { const m = new Map(); for (const t of state.tx) m.set(t.id, t.amount); return m; }
-  function loanDue(loan, i) { return addMonths(loan.first, i, jParse(loan.first).d); }
+  // سررسید قسط i: وام بانکی = هر ماه همون روزِ قسط اول. خرید قسطی (restDay): قسط اول روز خرید، بقیه روز restDay ماه‌های بعد
+  function loanDue(loan, i) {
+    if (loan.restDay && i > 0) {
+      const [y, m] = addYm(ym(loan.first), i).split('/').map(Number);
+      return jStr(y, m, Math.min(loan.restDay, monthLen(y, m)));
+    }
+    return addMonths(loan.first, i, jParse(loan.first).d);
+  }
 
   // هر تعهد: amount = مبلغ واقعی اگه پرداخت شده، وگرنه مبلغ اسمی/پیش‌بینی
   function obligationsForMonth(state, ymStr, txMap) {
