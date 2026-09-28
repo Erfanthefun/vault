@@ -539,6 +539,48 @@ textarea { min-height: 130px; margin-top: 12px; resize: vertical; }
 .nwc-rows .net dt { color: var(--ink); font-weight: 700; } .nwc-rows .net dd { font-weight: 800; }
 .nwc-seal { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: .8rem; color: var(--muted); }
 .nwc-seal.stale span { color: var(--warn); font-weight: 600; }
+
+/* ===== نسخه‌ی ۳: ناوبری و اجزای جدید ===== */
+.hdr-tools { display: flex; gap: 8px; }
+.hdr-back { display: flex; align-items: center; gap: 10px; }
+.top.sub h1 { font-size: 1.4rem; }
+.tabbar .addbtn { padding: 4px 2px; }
+.tabbar .addbtn span { display: grid; place-items: center; width: 50px; height: 50px; border-radius: 16px; background: var(--navy); color: var(--gold-hi); margin-top: -2px; transition: transform 160ms var(--ease-out); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tabbar .addbtn span { background: var(--gold-hi); color: #111; } }
+.tabbar .addbtn:active span { transform: scale(.94); }
+.tabbar .addbtn svg { width: 26px; height: 26px; }
+/* آیکون دسته */
+.cat-ic { display: inline-grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 10px; font-weight: 800; font-size: .95rem;
+  background: hsl(var(--h) 55% 94%); color: hsl(var(--h) 45% 30%); }
+.cat-ic svg { width: 18px; height: 18px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cat-ic { background: hsl(var(--h) 30% 20%); color: hsl(var(--h) 65% 75%); } }
+.catgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.chip.cattile { display: grid; justify-items: center; gap: 4px; padding: 10px 4px 8px; border-radius: 12px; white-space: normal; text-align: center; font-size: .8rem; line-height: 1.3; min-height: 72px; }
+.chip.cattile.on { background: var(--brand-soft); color: var(--ink); border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.txrow > .cat-ic { width: 36px; height: 36px; }
+.incard .lc-top strong { display: inline-flex; align-items: center; gap: 8px; }
+.incard .cat-ic { width: 28px; height: 28px; } .incard .cat-ic svg { width: 15px; height: 15px; }
+/* جست‌وجو */
+.searchbox { position: relative; margin: 0 0 10px; }
+.searchbox .ic { position: absolute; inset-inline-start: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); width: 18px; height: 18px; pointer-events: none; }
+.searchbox input { padding-inline-start: 40px !important; background: var(--surface) !important; }
+.day-group h3 { display: flex; justify-content: space-between; align-items: baseline; }
+.dnet { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 700; }
+/* مرکز ثبت */
+.hubgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.hubgrid.two-col { grid-template-columns: 1fr 1fr; } .hubgrid.two-col .hubtile { min-height: 64px; grid-auto-flow: column; justify-content: start; align-items: center; text-align: start; padding: 10px 12px; }
+.hubtile { display: grid; justify-items: center; align-content: start; gap: 6px; padding: 12px 6px 10px; min-height: 88px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+  font-size: .8rem; font-weight: 700; line-height: 1.35; text-align: center; transition: transform 160ms var(--ease-out); }
+.hubtile:active { transform: scale(.96); }
+.hubtile .qi { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.sheet .grp { margin: 18px 2px 8px; } .sheet .grp:first-child { margin-top: 2px; }
+/* خانه: درآمد و مانده برای خرج */
+.eq .incrow dd { color: #9FE3BC; }
+.eq .free dt { color: var(--on-hero); font-weight: 700; }
+.perday { margin: 2px 0 0; font-size: .8rem; color: var(--on-hero-2); text-align: end; }
+.ob.inc .tick { border-color: var(--good); }
+.ob.inc.paid .tick { background: var(--good); border-color: var(--good); color: #fff; }
+@media (max-width: 360px) { .hubgrid:not(.two-col) { grid-template-columns: repeat(2, 1fr); } .catgrid { grid-template-columns: repeat(3, 1fr); } }
 </style>
 </head>
 <body>
@@ -546,15 +588,14 @@ textarea { min-height: 130px; margin-top: 12px; resize: vertical; }
 <nav class="tabbar" aria-label="بخش‌ها"><div>
   <button data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>خانه</button>
   <button data-tab="tx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9"/></svg>تراکنش‌ها</button>
-  <button data-tab="ob"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>تعهدات</button>
-  <button data-tab="inv"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7M12 17v-1.8M15.2 12H17M7 12h1.8"/></svg>سرمایه</button>
-  <button data-tab="rep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 20V11M12 20V5M18 20v-6"/></svg>گزارش</button>
+  <button class="addbtn" data-act="addhub" aria-label="ثبت کن"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span></button>
+  <button data-tab="ob"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>برنامه</button>
+  <button data-tab="inv"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 8.8V7M12 17v-1.8M15.2 12H17M7 12h1.8"/></svg>دارایی</button>
 </div></nav>
 <div id="toast" role="status"></div>
 <script src="core.js"></script>
 <script src="invest.js"></script>
 <script src="invest-ui.js"></script>
 <script src="app.js"></script>
-<script src="xlsx.full.min.js" defer></script>
 </body>
 </html>

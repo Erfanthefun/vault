@@ -99,8 +99,11 @@
         realized.r += o.proceeds - removed.r; realized.byAsset[o.out.a] += o.proceeds - removed.r;
         if (u) realized.u += o.proceeds / u - removed.u;
         flows.push({ date: o.date, r: -o.proceeds });
-      } else if (o.out && !o.in && o.out.a === 'irr') { // برداشت ریال
+      } else if (o.out && !o.in && o.out.a === 'irr') { // برداشت ریال یا هدیه‌ی نقدی
         flows.push({ date: o.date, r: -o.out.q });
+      } else if (o.out && !o.in && o.type === 'gift_out') { // هدیه دادم: ارزش روز از دارایی کم می‌شه، سود و زیانی محقق نمی‌شه
+        const Pd = priceAt(state, o.date), ur = unitRial(o.out.a, Pd, state.settings);
+        flows.push({ date: o.date, r: -(ur ? o.out.q * ur : removed.r) });
       }
       if (o.in) {
         const { a, q } = o.in, dest = o.loc2 || o.loc;

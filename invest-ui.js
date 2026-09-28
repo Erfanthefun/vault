@@ -19,6 +19,7 @@
     deposit: svg('<rect x="4" y="6" width="16" height="12" rx="2"/><path d="M12 9v6M9.5 12.5 12 15l2.5-2.5"/>'),
     withdraw: svg('<rect x="4" y="6" width="16" height="12" rx="2"/><path d="M12 15V9M9.5 11.5 12 9l2.5 2.5"/>'),
     open: svg('<path d="M4 7h16v12H4zM4 7l2-3h12l2 3M10 11h4"/>'), clock: svg('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'),
+    gift: svg('<rect x="4" y="9" width="16" height="11" rx="1.5"/><path d="M4 13h16M12 9v11M12 9c-2-4-6-4-6-1.5S10 9 12 9zm0 0c2-4 6-4 6-1.5S14 9 12 9z"/>'),
     lock: svg('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
     gear: svg('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>')
   };
@@ -128,8 +129,8 @@
     <nav class="qa4" aria-label="عملیات سریع">
       <button data-act="op" data-type="buy"><span class="qi">${IC.buy}</span>خرید</button>
       <button data-act="op" data-type="sell"><span class="qi">${IC.sell}</span>فروش</button>
-      <button data-act="op" data-type="swap"><span class="qi">${IC.swap}</span>تبدیل</button>
-      <button data-act="op" data-type="transfer"><span class="qi">${IC.transfer}</span>انتقال</button>
+      <button data-act="op" data-type="gift_in"><span class="qi">${IC.gift}</span>هدیه</button>
+      <button data-act="opchooser"><span class="qi">${IC.plus}</span>بیشتر</button>
     </nav>
     ${idle.length ? `<section class="block"><h2>ریالِ بلااستفاده</h2>${idle.map(x => `<div class="notice">${IC.clock}<span><b>${toman(x.q)}</b> از ${ago(x.since)} در <b>${esc(x.loc.name)}</b> مونده.${x.usdLoss !== null && x.usdLoss > 0.001 ? ` در این مدت به دلار حدود <b>${dec(x.usdLoss * 100, 1)}٪</b> ارزش از دست داده.` : ''}</span></div>`).join('')}</section>` : ''}
     ${hasOps ? `<section class="block"><div class="block-head"><h2>ترکیب دارایی</h2></div>
@@ -169,28 +170,30 @@
 
   const OPS = {
     buy: { t: 'خرید', ic: 'buy' }, sell: { t: 'فروش', ic: 'sell' }, swap: { t: 'تبدیل', ic: 'swap' }, transfer: { t: 'انتقال', ic: 'transfer' },
-    deposit: { t: 'واریز ریال', ic: 'deposit' }, withdraw: { t: 'برداشت ریال', ic: 'withdraw' }, open: { t: 'موجودی اولیه', ic: 'open' }
+    deposit: { t: 'واریز ریال', ic: 'deposit' }, withdraw: { t: 'برداشت ریال', ic: 'withdraw' }, open: { t: 'موجودی اولیه', ic: 'open' },
+    gift_in: { t: 'هدیه گرفتم', ic: 'gift' }, gift_out: { t: 'هدیه دادم', ic: 'gift' }
   };
   function opTitle(o) {
     const A = x => ASSETS[x.a].name;
     switch (o.type) {
       case 'buy': return `خرید ${A(o.in)}`; case 'sell': return `فروش ${A(o.out)}`; case 'swap': return `${A(o.out)} به ${A(o.in)}`;
-      case 'transfer': return `انتقال ${A(o.out)}`; case 'open': return `موجودی اولیه‌ی ${A(o.in)}`; default: return OPS[o.type].t;
+      case 'transfer': return `انتقال ${A(o.out)}`; case 'open': return `موجودی اولیه‌ی ${A(o.in)}`;
+      case 'gift_in': return `هدیه: ${A(o.in)}`; case 'gift_out': return `هدیه دادم: ${A(o.out)}`; default: return OPS[o.type].t;
     }
   }
   function opRow(o) {
     const where = o.type === 'transfer' ? `${locName(o.loc)} ← ${locName(o.loc2)}` : locName(o.loc);
-    const outTxt = o.out ? qtyTxt(o.out.q, o.out.a) : o.cost != null && o.type !== 'deposit' && o.type !== 'open' ? toman(o.cost) + ' از حساب' : '';
+    const outTxt = o.out ? qtyTxt(o.out.q, o.out.a) : o.cost != null && !['deposit', 'open', 'gift_in'].includes(o.type) ? toman(o.cost) + ' از حساب' : '';
     const inTxt = o.in ? qtyTxt(o.in.q, o.in.a) : o.proceeds != null ? toman(o.proceeds) + ' به حساب' : '';
     return `<li><button class="oprow" data-act="editop" data-id="${esc(o.id)}"><span class="opi ${OPS[o.type].ic}">${IC[OPS[o.type].ic]}</span>
       <span class="main"><strong>${opTitle(o)}</strong><span>${esc(where)}${o.note ? '، ' + esc(o.note) : ''}</span></span>
       <span class="flow">${outTxt ? `<span class="o">−${outTxt}</span>` : ''}${inTxt ? `<span class="n">+${inTxt}</span>` : ''}</span></button></li>`;
   }
   function opsHtml() {
-    const list = S.ops.filter(o => opFilter === 'all' || o.type === opFilter || (opFilter === 'cash' && (o.type === 'deposit' || o.type === 'withdraw'))).sort((a, b) => V.opSort(b, a));
+    const list = S.ops.filter(o => opFilter === 'all' || o.type === opFilter || (opFilter === 'cash' && (o.type === 'deposit' || o.type === 'withdraw')) || (opFilter === 'gift' && o.type.startsWith('gift'))).sort((a, b) => V.opSort(b, a));
     const groups = {}; list.forEach(o => (groups[o.date] = groups[o.date] || []).push(o));
     return `
-    <div class="chips seg" role="group" aria-label="فیلتر">${[['all', 'همه'], ['buy', 'خرید'], ['sell', 'فروش'], ['swap', 'تبدیل'], ['transfer', 'انتقال'], ['cash', 'واریز/برداشت'], ['open', 'موجودی اولیه']].map(([k, n]) =>
+    <div class="chips seg" role="group" aria-label="فیلتر">${[['all', 'همه'], ['buy', 'خرید'], ['sell', 'فروش'], ['swap', 'تبدیل'], ['transfer', 'انتقال'], ['gift', 'هدیه'], ['cash', 'واریز/برداشت'], ['open', 'موجودی اولیه']].map(([k, n]) =>
       `<button class="chip ${opFilter === k ? 'on' : ''}" data-act="opf" data-f="${k}" aria-pressed="${opFilter === k}">${n}</button>`).join('')}</div>
     ${list.length ? Object.keys(groups).map(d => `<section class="day-group"><h3>${J.weekday(d)} ${dateTitle(d)}</h3><ul class="ledger">${groups[d].map(opRow).join('')}</ul></section>`).join('')
       : `<p class="empty">عملیاتی ثبت نشده.</p>`}
@@ -390,8 +393,8 @@
     type = E ? E.type : type;
     const firstLoc = (S.locations[0] || {}).id;
     const loc = E ? E.loc : firstLoc;
-    let asset = E ? ((E.type === 'sell' || E.type === 'swap' || E.type === 'transfer') ? E.out.a : E.in ? E.in.a : 'irr') : (type === 'swap' ? 'usdt' : 'gold');
-    const assetList = type === 'open' ? HOLD_ASSETS.concat(['irr']) : HOLD_ASSETS;
+    let asset = E ? ((['sell', 'swap', 'transfer', 'gift_out'].includes(E.type)) ? E.out.a : E.in ? E.in.a : 'irr') : (type === 'swap' ? 'usdt' : 'gold');
+    const assetList = ['open', 'gift_in', 'gift_out'].includes(type) ? HOLD_ASSETS.concat(['irr']) : HOLD_ASSETS;
     const title = (E ? 'ویرایش ' : '') + OPS[type].t;
     if (!S.locations.length) { toast('اول یه محل نگهداری تعریف کن.', 'bad'); openLocs(); return; }
     const payExt = E ? (E.type === 'buy' && !E.out) : false, recvExt = E ? (E.type === 'sell' && !E.in) : false;
@@ -410,6 +413,10 @@
       <div id="qwrap"></div><label class="lbl">مقدار رسیده به مقصد</label><div id="q2wrap"></div><p class="hint">تفاوتش کارمزد انتقاله. اگه خالی بذاری، همون مقدار ارسالی حساب می‌شه.</p>`;
     else if (type === 'deposit' || type === 'withdraw') fields = locSel('loc', loc, type === 'deposit' ? 'به کجا واریز کردی؟' : 'از کجا برداشت کردی؟') +
       `<label class="lbl">مبلغ</label>${tomanInput('amt', E ? (E.in || E.out).q : 0)}`;
+    else if (type === 'gift_in') fields = locSel('loc', loc, 'کجا نگهش می‌داری؟') + assetSel('asset', assetList, asset, 'چی هدیه گرفتی؟') +
+      `<div id="qwrap"></div><div id="costwrap"><label class="lbl">ارزش روز دریافت</label>${tomanInput('cost', E && E.in.a !== 'irr' ? E.cost : 0)}
+      <p class="hint">خالی بذاری، با قیمت ثبت‌شده‌ی همون روز حساب می‌شه. سود و زیان از همین ارزش به بعد سنجیده می‌شه.</p></div>`;
+    else if (type === 'gift_out') fields = locSel('loc', loc, 'از کجا؟') + assetSel('asset', assetList, asset, 'چی هدیه دادی؟') + `<div id="qwrap"></div>`;
     else if (type === 'open') fields = locSel('loc', loc, 'کجاست؟') + assetSel('asset', assetList, asset, 'چی؟') +
       `<div id="qwrap"></div><div id="costwrap"><label class="lbl">بهای خرید (جمع مبلغی که بابتش پرداخت کردی)</label>${tomanInput('cost', E && E.in.a !== 'irr' ? E.cost : 0)}
       <p class="hint">اگه دقیق یادت نیست، تقریبی بنویس یا <button type="button" class="linkbtn" id="usenow">ارزش امروز</button> رو بزن. سود و زیان از روی همین عدد حساب می‌شه.</p></div>`;
@@ -427,7 +434,7 @@
         if (!q1wrap) { update(); return; } // واریز و برداشت ریال فیلد مقدار جدا ندارن
         const initQ = E && (E.out || E.in) && ((E.out && E.out.a === a) ? E.out.q : (E.in && E.in.a === a) ? E.in.q : 0);
         const initPieces = E && ((E.out && E.out.pieces) || (E.in && E.in.pieces));
-        const lbl = type === 'buy' ? 'مقدار دریافتی (بعد از کارمزد)' : type === 'sell' ? 'مقدار فروخته‌شده' : type === 'swap' ? 'مقدار داده‌شده' : type === 'transfer' ? 'مقدار ارسالی' : 'مقدار';
+        const lbl = type === 'buy' ? 'مقدار دریافتی (بعد از کارمزد)' : type === 'sell' ? 'مقدار فروخته‌شده' : type === 'swap' ? 'مقدار داده‌شده' : type === 'transfer' ? 'مقدار ارسالی' : type.startsWith('gift') ? 'مقدار هدیه' : 'مقدار';
         if (a === 'irr') q1wrap.innerHTML = `<label class="lbl">مبلغ</label>${tomanInput('q1t', initQ || 0)}`;
         else if (a === 'bar' && type !== 'swap') q1wrap.innerHTML = piecesField('p', initPieces);
         else q1wrap.innerHTML = `<label class="lbl">${lbl}</label>${qtyInput('q1', a, initQ)}`;
@@ -465,6 +472,19 @@
         } else if (type === 'deposit' || type === 'withdraw') {
           const amt = readToman(ov, 'amt'); if (!amt) return { err: 'مبلغ لازمه.' };
           if (type === 'deposit') { o.in = { a: 'irr', q: amt }; o.cost = amt; } else o.out = { a: 'irr', q: amt };
+        } else if (type === 'gift_in') {
+          if (!qa) return { err: 'مقدار لازمه.' };
+          o.in = side;
+          if (a === 'irr') o.cost = qa;
+          else {
+            let c = readToman(ov, 'cost');
+            if (!c) { const Pd = V.priceAt(S, date), v = V.valueRial(a, qa, Pd, S.settings); c = v ? Math.round(v) : 0; }
+            if (!c && !silent) return { err: 'برای این دارایی قیمتی ثبت نشده؛ ارزش روز دریافت رو وارد کن.', op: o };
+            o.cost = c;
+          }
+        } else if (type === 'gift_out') {
+          if (!qa) return { err: 'مقدار لازمه.' };
+          o.out = side;
         } else if (type === 'open') {
           if (!qa) return { err: 'مقدار لازمه.' };
           o.in = side; o.cost = a === 'irr' ? qa : readToman(ov, 'cost');
@@ -577,7 +597,7 @@
   function view() {
     const subs = [['sum', 'خلاصه'], ['ops', 'عملیات'], ['an', 'تحلیل']];
     const body = invTab === 'ops' ? opsHtml() : invTab === 'an' ? anHtml() : overviewHtml() + (S.ops.length ? assetsHtml() : '');
-    return `<header class="top home-top"><h1>سرمایه</h1><button class="iconbtn gear" data-act="goset" aria-label="تنظیمات">${IC.gear}</button></header>
+    return `<header class="top home-top"><h1>دارایی</h1>${App.headerTools()}</header>
       <div class="chips seg" role="group" aria-label="بخش‌های سرمایه">${subs.map(([k, n]) => `<button class="chip ${invTab === k ? 'on' : ''}" data-act="invt" data-t="${k}" aria-pressed="${invTab === k}">${n}</button>`).join('')}</div>
       ${body}`;
   }

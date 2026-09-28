@@ -213,6 +213,21 @@
     return list.sort((a, b) => a.due.localeCompare(b.due) || a.name.localeCompare(b.name));
   }
 
+  // درآمدهای ثابت ماه (حقوق، اجاره‌ای که می‌گیری…): amount = مبلغ واقعی اگه دریافت شده، وگرنه مبلغ مورد انتظار
+  function incomesForMonth(state, ymStr, txMap) {
+    txMap = txMap || txAmountMap(state);
+    const [y, m] = ymStr.split('/').map(Number), out = [];
+    for (const f of (state.incomes || [])) {
+      if (f.start && ymStr < f.start) continue;
+      if (f.end && ymStr > f.end) continue;
+      const info = f.paid && f.paid[ymStr];
+      const got = info ? (info.txId && txMap.has(info.txId) ? txMap.get(info.txId) : f.amount) : f.amount;
+      out.push({ kind: 'income', id: f.id, key: ymStr, name: f.name, sub: f.variable ? 'درآمد متغیر، پیش‌بینی' : 'درآمد ثابت',
+        estimate: f.amount, amount: got, due: jStr(y, m, Math.min(f.day, monthLen(y, m))), paid: !!info, variable: !!f.variable });
+    }
+    return out.sort((a, b) => a.due.localeCompare(b.due));
+  }
+
   // تعهدات پرداخت‌نشده در بازه‌ی چند ماه اطراف ماه مرجع
   function openObligations(state, refYm, fromOffset, toOffset) {
     const map = txAmountMap(state); let all = [];
@@ -224,14 +239,18 @@
     const map = txAmountMap(state);
     const txs = state.tx.filter(t => ym(t.date) === ymStr);
     const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const inc = incomesForMonth(state, ymStr, map);
+    const incReceived = inc.filter(i => i.paid).reduce((s, i) => s + i.amount, 0);
+    const incPending = inc.filter(i => !i.paid).reduce((s, i) => s + i.amount, 0);
+    const planned = income + incPending; // درآمد ثبت‌شده + درآمدهای ثابتی که هنوز نرسیده
     const variable = txs.filter(t => t.type === 'expense' && !t.link).reduce((s, t) => s + t.amount, 0);
     const obs = obligationsForMonth(state, ymStr, map);
     const sum = arr => arr.reduce((s, o) => s + o.amount, 0);
     const unpaid = obs.filter(o => !o.paid), paid = obs.filter(o => o.paid);
     const obTotal = sum(obs), obPaid = sum(paid), obRemaining = sum(unpaid);
     const expected = (state.settings && state.settings.expectedIncome) || 0;
-    const base = Math.max(income, expected);
-    return { income, expected, base, hasIncome: base > 0, usedExpected: expected > income, variable, obs,
+    const base = Math.max(planned, expected);
+    return { income, expected, base, hasIncome: base > 0, usedExpected: expected > planned, variable, obs, inc, incReceived, incPending, planned,
       obTotal, obPaid, obRemaining, count: obs.length, paidCount: paid.length,
       loanRemaining: sum(unpaid.filter(o => o.kind === 'loan')),
       fixedRemaining: sum(unpaid.filter(o => o.kind === 'fixed' && !o.variable)),
@@ -364,7 +383,7 @@
   }
 
   root.Core = { toJ, toG, today, ym, addMonths, addYm, addDays, diffDays, monthLen, jParse, jStr, pad,
-    MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, openObligations, monthStats, loanDue, loanSummary,
+    MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomesForMonth, openObligations, monthStats, loanDue, loanSummary,
     ymIndex, monthOutflow, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis };
   root.J = root.Core;
 })(typeof window !== 'undefined' ? window : globalThis);
