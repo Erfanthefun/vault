@@ -16,7 +16,7 @@
 <style>
 @font-face { font-family: "Vazirmatn"; src: url("fonts/vazirmatn.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 :root {
-  --bg: #F4F5F7; --surface: #FFFFFF; --surface-2: #F1F3F6; --ink: #111A2B; --ink-2: #3A4557; --muted: #677083; --line: #E4E7EC; --line-2: #D3D9E1;
+  --bg: #F4F5F7; --surface: #FFFFFF; --surface-2: #F1F3F6; --ink: #111A2B; --ink-2: #3A4557; --muted: #58627A; --line: #E4E7EC; --line-2: #D3D9E1;
   --navy: #0F1B2D; --navy-2: #1B2B45; --on-navy: #EEF2F8; --on-navy-2: #A3B2C8;
   --gold: #86661C; --gold-hi: #D8B45E; --gold-soft: #F6EFDD;
   --brand: #0F1B2D; --brand-ink: #FFFFFF; --brand-soft: #E8ECF3;
@@ -245,7 +245,7 @@ li.empty { padding: 14px; }
 .hcol { display: grid; grid-template-rows: 1fr auto; height: 100%; }
 .hbars { display: flex; gap: 3px; align-items: end; justify-content: center; }
 .hbars i { width: 12px; min-height: 2px; border-radius: 4px 4px 0 0; }
-.inc, .k.inc { background: var(--brand); } .out, .k.out { background: var(--warn); }
+.hbars i.inc, .k.inc { background: var(--brand); } .hbars i.out, .k.out { background: var(--warn); }
 .hcol span { font-size: .7rem; color: var(--muted); text-align: center; }
 .legend { font-size: .8rem; color: var(--muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .k { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-inline-start: 8px; }
@@ -298,7 +298,7 @@ textarea { min-height: 130px; margin-top: 12px; resize: vertical; }
 
 /* نوار پایین */
 .tabbar { position: fixed; bottom: 0; inset-inline: 0; z-index: 40; display: flex; justify-content: center;
-  background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  background: color-mix(in srgb, var(--surface) 97%, transparent); backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4);
   border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
 .tabbar div { display: grid; grid-template-columns: repeat(5, 1fr); width: 100%; max-width: 560px; }
 .tabbar button { background: none; border: 0; padding: 9px 2px 7px; font-size: .72rem; color: var(--muted); display: grid; justify-items: center; gap: 3px; }

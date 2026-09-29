@@ -7,7 +7,6 @@
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let uidN = 0;
   const uid = () => Date.now().toString(36) + (uidN++).toString(36) + Math.random().toString(36).slice(2, 6);
-  const reduceMotion = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // ---------- آیکون‌ها ----------
   const svg = d => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -34,10 +33,15 @@
 
   // ---------- قالب‌بندی ----------
   const lensName = () => S.settings.lens;
-  const LENS = { toman: 'تومان', usd: 'دلار', gold: 'گرم طلا' };
+  // عدسی اول تابع واحدِ تنظیماته: «تومان» یا «ریال»
+  const rialMode = () => S && S.settings && S.settings.unit === 'rial';
+  const LENS = { get toman() { return rialMode() ? 'ریال' : 'تومان'; }, usd: 'دلار', gold: 'گرم طلا' };
+  const disp = rial => rialMode() ? rial : rial / 10;
+  const localAdj = () => rialMode() ? 'ریالی' : 'تومانی';
+  const lensVal = (rial, lz, P) => lz === 'toman' && rialMode() && rial !== null && rial !== undefined ? rial : V.lens(rial, lz, P);
   const dec = (x, d) => faDigits((+x.toFixed(d)).toString()).replace('.', '٫');
   function fmtLens(rial, lz = lensName(), withUnit = true) {
-    const P = V.latestPrice(S), v = V.lens(rial, lz, P);
+    const P = V.latestPrice(S), v = lensVal(rial, lz, P);
     if (v === null) return '—';
     let s;
     if (lz === 'toman') s = faNum(v);
@@ -51,7 +55,7 @@
     if (lz === 'usd') return sg + (a >= 1e3 ? dec(a / 1e3, 1) + 'K' : dec(a, 0)) + '$';
     return sg + dec(a, a >= 100 ? 0 : 1) + 'g';
   }
-  const toman = rial => faNum(rial / 10) + ' تومان';
+  const toman = rial => App.money(rial); // همون واحدی که در تنظیمات انتخاب شده (تومان یا ریال)
   const pct = (x, d = 1) => x === null || !isFinite(x) ? '—' : `<bdi dir="ltr">${x > 0 ? '+' : x < 0 ? '−' : ''}${dec(Math.abs(x * 100), d)}٪</bdi>`;
   const faUnit = a => ASSETS[a].fa || ASSETS[a].unit;
   const qtyStr = (q, a) => `${V.fmtQty(q, a)} <small>${faUnit(a)}</small>`;
@@ -74,10 +78,10 @@
     return J.jStr(y, m, Math.min(+$('[data-p=d]', w).value, J.monthLen(y, m)));
   }
   // مبلغ تومانی (عدد صحیح با جداکننده)
-  const tomanInput = (name, rial, ph) => { const s = rial ? faNum(rial / 10) : ''; return `<div class="unitwrap"><input class="toman" name="${name}" inputmode="numeric" autocomplete="off" placeholder="${ph || '۰'}" value="${s}"><span>تومان</span></div>`; };
+  const tomanInput = (name, rial, ph) => { const s = rial ? faNum(rial / 10) : ''; return `<div class="unitwrap"><input class="toman" name="${name}" inputmode="numeric" autocomplete="off" placeholder="${ph || '۰'}" value="${s}" aria-label="مبلغ به تومان"><span>تومان</span></div>`; };
   const readToman = (root, name) => { const v = Number(J.normDigits($(`[name="${name}"]`, root).value).replace(/\D/g, '').slice(0, 14)); return (v || 0) * 10; };
   // مقدار دارایی (اعشاری)
-  const qtyInput = (name, asset, q) => `<div class="unitwrap"><input class="qtyin" name="${name}" inputmode="decimal" autocomplete="off" placeholder="۰" value="${q ? V.fmtQty(q, asset) : ''}" data-asset="${asset}"><span>${ASSETS[asset].unit}</span></div>`;
+  const qtyInput = (name, asset, q) => `<div class="unitwrap"><input class="qtyin" name="${name}" inputmode="decimal" autocomplete="off" placeholder="۰" value="${q ? V.fmtQty(q, asset) : ''}" data-asset="${asset}" aria-label="مقدار ${ASSETS[asset].name}"><span>${ASSETS[asset].unit}</span></div>`;
   const readQty = (root, name, asset) => { const v = $(`[name="${name}"]`, root).value; return v.trim() ? V.parseQty(v.replace(/٬/g, ''), asset) : 0; };
   function bindInputs(root) {
     $$('input.toman', root).forEach(inp => inp.addEventListener('input', () => { const n = J.normDigits(inp.value).replace(/\D/g, '').slice(0, 14); inp.value = n ? faNum(Number(n)) : ''; }));
@@ -100,7 +104,7 @@
     }));
   }
 
-  const lensSwitch = () => `<div class="lens" role="group" aria-label="واحد سنجش">${Object.entries({ toman: 'تومان', usd: 'دلار', gold: 'طلا' }).map(([k, n]) =>
+  const lensSwitch = () => `<div class="lens" role="group" aria-label="واحد سنجش">${Object.entries({ toman: LENS.toman, usd: 'دلار', gold: 'طلا' }).map(([k, n]) =>
     `<button data-act="lens" data-l="${k}" aria-pressed="${lensName() === k}">${n}</button>`).join('')}</div>`;
 
   function overviewHtml() {
@@ -119,7 +123,7 @@
       <p class="nw-label">ارزش کل دارایی${bank ? ' (با موجودی بانک‌ها)' : ''}</p>
       <p class="nw-num"><span id="nwNum">${P || !hasOps ? fmtLens(pf.total, lz, false) : '—'}</span><small>${LENS[lz]}</small></p>
       ${P ? `<p class="equiv">${others.map(k => `<b>${fmtLens(pf.total, k, false)}</b> ${LENS[k]}`).join(' یا ')}</p>` : ''}
-      ${P && hasOps ? `<div class="pnl"><span class="${pf.pnlR >= 0 ? 'up' : 'down'}">سود و زیان تومانی: <bdi dir="ltr">${pf.pnlR >= 0 ? '+' : '−'}${faNum(Math.abs(pf.pnlR) / 10)}</bdi> تومان</span>
+      ${P && hasOps ? `<div class="pnl"><span class="${pf.pnlR >= 0 ? 'up' : 'down'}">سود و زیان ${localAdj()}: <bdi dir="ltr">${pf.pnlR >= 0 ? '+' : '−'}${faNum(disp(Math.abs(pf.pnlR)))}</bdi> ${LENS.toman}</span>
         <span class="${pf.pnlU >= 0 ? 'up' : 'down'}">دلاری: <bdi dir="ltr">${pf.pnlU >= 0 ? '+' : '−'}${dec(Math.abs(pf.pnlU), Math.abs(pf.pnlU) >= 100 ? 0 : 2)}</bdi> دلار</span></div>` : ''}
       <div class="seal ${stale !== null && stale >= 3 ? 'stale' : ''}"><span>${P ? `قیمت‌ها: <b>${ago(P.date)}</b>` : 'هنوز قیمتی ثبت نشده'}</span><button data-act="prices">به‌روزرسانی قیمت</button></div>
       ${P && hasOps && pf.assets.some(x => x.q > 0 && x.value === null) ? `<p class="nw-warn">قیمت ${pf.assets.filter(x => x.q > 0 && x.value === null).map(x => ASSETS[x.a].name).join('، ')} ثبت نشده و در جمع حساب نشده.</p>` : ''}
@@ -151,7 +155,7 @@
         : `<p class="note">مثلاً «۵۰ گرم طلا تا عید» یا «۵ هزار دلار برای ماشین».</p>`}
     </section>`;
   }
-  const goalUnit = g => g.kind === 'gold' ? 'گرم طلا' : g.kind === 'silver' ? 'گرم نقره' : ASSETS[g.kind] && g.kind !== 'irr' ? (ASSETS[g.kind].fa || ASSETS[g.kind].unit) : LENS[g.lens || 'toman'];
+  const goalUnit = g => g.kind === 'gold' ? 'گرم طلا' : g.kind === 'silver' ? 'گرم نقره‌ی ۹۹۹' : ASSETS[g.kind] && g.kind !== 'irr' ? (ASSETS[g.kind].fa || ASSETS[g.kind].unit) : ({ toman: 'تومان', usd: 'دلار', gold: 'گرم طلا' })[g.lens || 'toman'];
   const goalCur = (g, v) => v === null ? '—' : (g.kind === 'btc' ? dec(v, 4) : g.kind === 'value' && (g.lens || 'toman') === 'toman' ? faNum(v) : dec(v, v >= 100 ? 0 : 2)) + ' ' + goalUnit(g);
 
   function assetsHtml() {
@@ -165,7 +169,7 @@
       const unit = x.a !== 'irr' && x.avgUnit !== null ? x.avgUnit * ASSETS[x.a].base : null;
       return `<li><button class="row" data-act="asset" data-a="${x.a}"><i class="key k-${x.a}"></i>
         <span class="main"><strong>${ASSETS[x.a].name}</strong><span>${unit !== null ? `میانگین خرید: ${toman(unit)} هر ${faUnit(x.a)}` : x.a === 'irr' ? 'نقد در محل‌ها' : ''}</span>
-        <span>${x.a !== 'irr' ? `تومانی <b class="${pr >= 0 ? 'pos' : 'neg'}">${pct(pr)}</b>، دلاری <b class="${prU >= 0 ? 'pos' : 'neg'}">${pct(prU)}</b>` : prU !== null ? `ارزش دلاری از زمان ورود: <b class="${prU >= 0 ? 'pos' : 'neg'}">${pct(prU)}</b>` : ''}</span></span>
+        <span>${x.a !== 'irr' ? `${localAdj()} <b class="${pr >= 0 ? 'pos' : 'neg'}">${pct(pr)}</b>، دلاری <b class="${prU >= 0 ? 'pos' : 'neg'}">${pct(prU)}</b>` : prU !== null ? `ارزش دلاری از زمان ورود: <b class="${prU >= 0 ? 'pos' : 'neg'}">${pct(prU)}</b>` : ''}</span></span>
         <span class="side"><b class="qty">${qtyStr(x.q, x.a)}</b><span>${fmtLens(x.value)}</span></span></button></li>`; }).join('')}</ul>
       <p class="note">درصدها سود یا زیان روی کاغذ نسبت به میانگین قیمت خریدن. سود محقق‌شده‌ی فروش‌ها در تب تحلیل هست.</p>`
       : `<p class="empty">هنوز دارایی‌ای ثبت نشده. از «موجودی اولیه» شروع کن.</p><button class="btn wide" data-act="op" data-type="open">ثبت موجودی اولیه</button>`}
@@ -236,13 +240,13 @@
     const hist = V.history(S);
     const shortD = d => { const { m, d: dd } = J.jParse(d); return `${faDigits(dd)} ${MONTHS[m - 1].slice(0, 3)}`; };
     const histChart = hist.length > 1 ? lineChart({ labels: hist.map(h => shortD(h.date)), area: true, fmt: v => shortLens(v, lz),
-      series: [{ cls: 's-accent', values: hist.map(h => V.lens(h.total, lz, h.P)) }],
-      tips: hist.map(h => { const v = V.lens(h.total, lz, h.P); return `${dateTitle(h.date)}: ${lz === 'toman' ? faNum(v) : dec(v, 2)} ${LENS[lz]}`; }) }) : '';
+      series: [{ cls: 's-accent', values: hist.map(h => lensVal(h.total, lz, h.P)) }],
+      tips: hist.map(h => { const v = lensVal(h.total, lz, h.P); return `${dateTitle(h.date)}: ${lz === 'toman' ? faNum(v) : dec(v, 2)} ${LENS[lz]}`; }) }) : '';
     const w = V.whatIf(S);
     const cmp = w ? [{ k: 'me', n: 'ترکیب فعلی تو', v: w.actual, cls: 'var(--navy)' }, { k: 'gold', n: 'اگه همه طلا بود', v: w.alt.gold, cls: 'var(--a-gold)' },
       { k: 'usd', n: 'اگه همه دلار بود', v: w.alt.usd, cls: 'var(--a-usd)' }, { k: 'eur', n: 'اگه همه یورو بود', v: w.alt.eur, cls: 'var(--a-eur)' },
       { k: 'usdt', n: 'اگه همه تتر بود', v: w.alt.usdt, cls: 'var(--a-usdt)' }, { k: 'btc', n: 'اگه همه بیت‌کوین بود', v: w.alt.btc, cls: 'var(--a-btc)' },
-      { k: 'silver', n: 'اگه همه نقره بود', v: w.alt.silver, cls: 'var(--a-silver)' }, { k: 'irr', n: 'اگه ریالی نگه داشته بودی', v: w.alt.irr, cls: 'var(--a-irr)' }].filter(x => x.v !== null) : [];
+      { k: 'silver', n: 'اگه همه نقره‌ی ۹۹۹ بود', v: w.alt.silver, cls: 'var(--a-silver)' }, { k: 'irr', n: 'اگه ریالی نگه داشته بودی', v: w.alt.irr, cls: 'var(--a-irr)' }].filter(x => x.v !== null) : [];
     const cmax = Math.max(1, ...cmp.map(x => x.v));
     const R = pf.R;
     const priceSeries = (key, conv, fmt, label) => {
@@ -255,24 +259,24 @@
     ${w ? `<section class="box" style="margin-top:14px"><h2>اگه جاش…</h2><p class="note">اگه همه‌ی پولی که وارد کردی (${toman(w.invested)})، از همون روز در یک دارایی بود، الان چقدر می‌ارزید؟ ارزش‌ها به ${LENS[lz]}.</p>
       <ul class="cmpbars">${cmp.sort((a, b) => b.v - a.v).map(x => `<li class="${x.k === 'me' ? 'me' : ''}"><div><span>${x.n}</span><b>${fmtLens(x.v)}</b></div><i style="width:${Math.max(2, x.v / cmax * 100)}%;background:${x.cls}"></i></li>`).join('')}</ul></section>` : ''}
     <section class="box" style="margin-top:14px"><h2>بازده هر دارایی</h2>
-      <table class="tbl"><thead><tr><th>دارایی</th><th>بهای خرید</th><th>تومانی</th><th>دلاری</th></tr></thead><tbody>
+      <table class="tbl"><thead><tr><th>دارایی</th><th>بهای خرید</th><th>${localAdj()}</th><th>دلاری</th></tr></thead><tbody>
       ${pf.assets.filter(x => x.q > 0 && x.a !== 'irr').map(x => { const pr = x.basisR ? x.pnlR / x.basisR : null, pu = x.basisU ? x.pnlU / x.basisU : null;
-        return `<tr><td>${ASSETS[x.a].name}</td><td>${shortLens(x.basisR / 10, 'toman')}</td><td class="${pr >= 0 ? 'pos' : 'neg'}">${pct(pr)}</td><td class="${pu >= 0 ? 'pos' : 'neg'}">${pct(pu)}</td></tr>`; }).join('')}
+        return `<tr><td>${ASSETS[x.a].name}</td><td>${shortLens(disp(x.basisR), 'toman')}</td><td class="${pr >= 0 ? 'pos' : 'neg'}">${pct(pr)}</td><td class="${pu >= 0 ? 'pos' : 'neg'}">${pct(pu)}</td></tr>`; }).join('')}
       </tbody></table>
-      <p class="note">سود محقق‌شده از فروش‌ها: <b class="${R.realized.r >= 0 ? 'pos' : 'neg'}"><bdi dir="ltr">${R.realized.r >= 0 ? '+' : '−'}${faNum(Math.abs(R.realized.r) / 10)}</bdi> تومان</b> (به دلار <bdi dir="ltr">${R.realized.u >= 0 ? '+' : '−'}${dec(Math.abs(R.realized.u), 2)}</bdi>).</p></section>
+      <p class="note">سود محقق‌شده از فروش‌ها: <b class="${R.realized.r >= 0 ? 'pos' : 'neg'}"><bdi dir="ltr">${R.realized.r >= 0 ? '+' : '−'}${faNum(disp(Math.abs(R.realized.r)))}</bdi> ${LENS.toman}</b> (به دلار <bdi dir="ltr">${R.realized.u >= 0 ? '+' : '−'}${dec(Math.abs(R.realized.u), 2)}</bdi>).</p></section>
     ${priceSeries('gold', p => p.gold / 10, (v, full) => full ? faNum(v) + ' تومان' : shortLens(v, 'toman'), 'قیمت گرم طلای ۱۸ عیار')}
     ${priceSeries('usdt', p => p.usdt / 10, (v, full) => full ? faNum(v) + ' تومان' : shortLens(v, 'toman'), 'قیمت تتر')}
     ${priceSeries('btc', p => p.btc, (v, full) => full ? faNum(v) + ' دلار' : shortLens(v, 'usd'), 'قیمت بیت‌کوین (دلار)')}
     ${priceSeries('usd', p => p.usd / 10, (v, full) => full ? faNum(v) + ' تومان' : shortLens(v, 'toman'), 'قیمت دلار')}
     ${priceSeries('eur', p => p.eur / 10, (v, full) => full ? faNum(v) + ' تومان' : shortLens(v, 'toman'), 'قیمت یورو')}
-    ${priceSeries('silver', p => p.silver / 10, (v, full) => full ? faNum(v) + ' تومان' : shortLens(v, 'toman'), 'قیمت گرم نقره')}
+    ${priceSeries('silver', p => p.silver / 10, (v, full) => full ? faNum(v) + ' تومان' : shortLens(v, 'toman'), 'قیمت گرم نقره‌ی ۹۹۹')}
     <section class="box" style="margin-top:14px"><h2>خروجی اکسل</h2><p class="note">یه فایل کامل: دارایی‌ها، محل‌ها، عملیات سرمایه و قیمت‌ها، کنار تراکنش‌ها، وام‌ها و شاخص‌های مالی.</p><button class="btn wide" data-act="excel">ساخت فایل اکسل</button></section>`;
   }
 
   // ---------- قیمت‌ها ----------
   const PRICE_FIELDS = [
     ['gold', 'گرم طلای ۱۸ عیار', 'toman'], ['usd', 'دلار', 'toman'], ['eur', 'یورو', 'toman'],
-    ['usdt', 'تتر', 'toman'], ['btc', 'بیت‌کوین (به دلار)', 'usd'], ['silver', 'گرم نقره', 'toman']
+    ['usdt', 'تتر', 'toman'], ['btc', 'بیت‌کوین (به دلار)', 'usd'], ['silver', 'گرم نقره‌ی ۹۹۹', 'toman']
   ];
   const priceText = (k, v) => v ? (k === 'btc' ? dec(v, 2) + '$' : faNum(v / 10)) : '—';
   function openPrices(pasted) {
@@ -403,8 +407,8 @@
     if (!S.locations.length) { toast('اول یه محل نگهداری تعریف کن.', 'bad'); openLocs(); return; }
     const payExt = E ? (E.type === 'buy' && !E.out) : false, recvExt = E ? (E.type === 'sell' && !E.in) : false;
     let fields = '';
-    const locSel = (name, sel, label) => `<label class="lbl">${label}</label><select name="${name}" class="locsel">${locOptions(sel)}</select>`;
-    const assetSel = (name, list, sel, label) => `<label class="lbl">${label}</label><select name="${name}">${assetOptions(list, sel)}</select>`;
+    const locSel = (name, sel, label) => `<label class="lbl" for="f-${name}">${label}</label><select id="f-${name}" name="${name}" class="locsel">${locOptions(sel)}</select>`;
+    const assetSel = (name, list, sel, label) => `<label class="lbl" for="f-${name}">${label}</label><select id="f-${name}" name="${name}">${assetOptions(list, sel)}</select>`;
     if (type === 'buy') fields = locSel('loc', loc, 'کجا خریدی؟') + assetSel('asset', HOLD_ASSETS, asset, 'چی خریدی؟') +
       `<div id="qwrap"></div><label class="lbl">مبلغ کل پرداختی (با کارمزد)</label>${tomanInput('amt', E ? (E.out ? E.out.q : E.cost) : 0)}
       <label class="lbl">پول از کجا اومد؟</label><div class="radio"><label><input type="radio" name="src" value="loc" ${!payExt ? 'checked' : ''}> از ریالِ موجود در همین محل</label><label><input type="radio" name="src" value="ext" ${payExt ? 'checked' : ''}> از حساب بانکی (مستقیم)</label></div>`;
@@ -431,7 +435,6 @@
     openSheet(title, html, ov => {
       bindNewLoc(ov);
       const val = n => { const el = $(`[name=${n}]`, ov); return el ? el.value : null; };
-      const q1 = () => val('asset') === 'bar' && type !== 'swap' ? (readPieces(ov, 'p') || { q: 0 }).q : readQty(ov, 'q1', val('asset'));
       const renderQty = () => {
         const a = val('asset');
         const q1wrap = $('#qwrap', ov);
@@ -538,10 +541,10 @@
   // ---------- هدف‌ها ----------
   function openGoal(id) {
     const g = id ? S.goals.find(x => x.id === id) : null;
-    const kinds = [['gold', 'گرم طلا (۱۸ عیار + شمش)'], ['usd', 'دلار'], ['eur', 'یورو'], ['usdt', 'تتر'], ['btc', 'بیت‌کوین'], ['silver', 'گرم نقره'], ['value', 'ارزش کل دارایی']];
+    const kinds = [['gold', 'گرم طلا (۱۸ عیار + شمش)'], ['usd', 'دلار'], ['eur', 'یورو'], ['usdt', 'تتر'], ['btc', 'بیت‌کوین'], ['silver', 'گرم نقره‌ی ۹۹۹'], ['value', 'ارزش کل دارایی']];
     const html = `<label class="lbl">اسم هدف</label><input id="gname" value="${esc(g ? g.name : '')}" placeholder="مثلاً طلا برای عید">
       <label class="lbl">به چی سنجیده بشه؟</label><select id="gkind">${kinds.map(([k, n]) => `<option value="${k}" ${g && g.kind === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
-      <div id="glenswrap"><label class="lbl">واحد</label><select id="glens">${Object.entries(LENS).map(([k, n]) => `<option value="${k}" ${g && g.lens === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+      <div id="glenswrap"><label class="lbl">واحد</label><select id="glens">${Object.entries({ toman: 'تومان', usd: 'دلار', gold: 'گرم طلا' }).map(([k, n]) => `<option value="${k}" ${g && g.lens === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
       <label class="lbl">مقدار هدف</label><input id="gtarget" inputmode="decimal" value="${g ? faDigits(g.target).replace('.', '٫') : ''}" placeholder="مثلاً ۵۰">
       <div class="btnrow"><button class="btn wide" id="gsave">${g ? 'ذخیره' : 'افزودن هدف'}</button>${g ? `<button class="btn danger" id="gdel">حذف</button>` : ''}</div>`;
     openSheet(g ? 'ویرایش هدف' : 'هدف جدید', html, ov => {
@@ -572,7 +575,7 @@
         o.in ? ASSETS[o.in.a].name : '', o.in ? (o.in.a === 'irr' ? o.in.q / 10 : q(o.in.q, o.in.a)) : '',
         o.cost != null ? o.cost / 10 : '', o.proceeds != null ? o.proceeds / 10 : '', o.note || ''])),
       'عملیات سرمایه', [12, 12, 16, 16, 14, 14, 14, 14, 18, 18, 24]);
-    add([['تاریخ', 'طلای ۱۸ (تومان/گرم)', 'دلار (تومان)', 'یورو (تومان)', 'تتر (تومان)', 'بیت‌کوین (دلار)', 'نقره (تومان/گرم)']]
+    add([['تاریخ', 'طلای ۱۸ (تومان/گرم)', 'دلار (تومان)', 'یورو (تومان)', 'تتر (تومان)', 'بیت‌کوین (دلار)', 'نقره‌ی ۹۹۹ (تومان/گرم)']]
       .concat(S.prices.slice().sort((a, b) => a.date.localeCompare(b.date)).map(p => [p.date, p.gold ? p.gold / 10 : '', p.usd ? p.usd / 10 : '', p.eur ? p.eur / 10 : '', p.usdt ? p.usdt / 10 : '', p.btc || '', p.silver ? p.silver / 10 : ''])),
       'قیمت‌ها', [12, 16, 14, 14, 14, 16, 16]);
   }

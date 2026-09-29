@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۴';
+  const VERSION = '۵';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -326,6 +326,8 @@
     const views = { home: homeView, tx: txView, ob: obView, rep: repView, set: setView, inv: () => window.Inv ? window.Inv.view() : '' };
     v.innerHTML = (views[tab] || homeView)();
     if (window.Inv) window.Inv.afterRender(v);
+    // هر نمودار اسم عنوانش رو می‌گیره تا VoiceOver بگه چه نموداریه
+    $$('svg[role=img]:not([aria-label])', v).forEach(g => { const h = g.closest('figure, section'); const t = h && h.querySelector('h2'); g.setAttribute('aria-label', 'نمودار: ' + (t ? t.textContent.trim() : 'داده‌ها')); });
     $$('input.amt', v).forEach(bindAmount);
     if (tab === 'home') animateHero(); else lastHero = null;
   }
@@ -1751,7 +1753,7 @@
 
   // ---------- شروع ----------
   // رابط مشترک برای ماژول سرمایه (invest-ui.js)
-  window.App = { save, render: () => render(), go, headerTools: () => headerTools(), catIcon, bankTotal, creditUsedTotal, bankAccounts, openSheet, closeSheet, closeAll, toast, once, esc, $, $$, uid, shareFile, today,
+  window.App = { save, render: () => render(), go, headerTools: () => headerTools(), catIcon, bankTotal, creditUsedTotal, bankAccounts, money, openSheet, closeSheet, closeAll, toast, once, esc, $, $$, uid, shareFile, today,
     get tab() { return tab; }, debtTotals, loanRemaining: () => S.loans.reduce((s, l) => s + C.loanSummary(l).remainingAmount, 0) };
   try { history.replaceState({ tab: 'home' }, ''); } catch (e) { /* */ }
   load(); render(); showLock(); route();

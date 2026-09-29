@@ -8,7 +8,7 @@
     irr:  { name: 'ریال', unit: 'تومان', base: 10, dec: 0 },          // ذخیره به ریال، نمایش به تومان
     gold: { name: 'طلای ۱۸ عیار', unit: 'گرم', base: 1000, dec: 3 },  // میلی‌گرم (طلای آنلاین/گرمی)
     bar:  { name: 'شمش طلا', unit: 'گرم', base: 1000, dec: 3 },       // میلی‌گرم، با قیمت طلای ۱۸
-    silver: { name: 'نقره', unit: 'گرم', base: 1000, dec: 3 },        // میلی‌گرم
+    silver: { name: 'نقره‌ی ۹۹۹', unit: 'گرم', base: 1000, dec: 3 },  // میلی‌گرم، عیار ۹۹۹
     usd:  { name: 'دلار', unit: 'USD', fa: 'دلار', base: 100, dec: 2 },  // سنت
     eur:  { name: 'یورو', unit: 'EUR', fa: 'یورو', base: 100, dec: 2 },  // سنت
     usdt: { name: 'تتر', unit: 'USDT', fa: 'تتر', base: 1e6, dec: 2 },           // میکروتتر
@@ -215,33 +215,51 @@
   const RULES = [
     { k: 'btc', re: /(بیت\s*کوین|bitcoin|\bbtc\b)/i },
     { k: 'usdt', re: /(تتر|\busdt\b|tether)/i },
-    { k: 'gold', re: /(طلای?\s*18\s*عیار|طلای?\s*گرمی|گرم\s*طلا|طلای?\s*18(?!\d))/i, not: /(24|آب\s*شده|آبشده|انس|اونس|سکه|مثقال|ounce)/i },
+    { k: 'gold', re: /(طلای?\s*18\s*عیار|طلای?\s*گرمی|گرم\s*طلا|طلای?\s*18(?!\d))/i, not: /(24\s*عیار|عیار\s*24|آب\s*شده|آبشده|انس|اونس|سکه|مثقال|ounce)/i },
     { k: 'silver', re: /(نقره|silver)/i, not: /(انس|اونس|ounce)/i },
     { k: 'eur', re: /(یورو|\beur\b|euro)/i, lead: true },
     { k: 'usd', re: /(دلار|\busd\b)/i, lead: true }
   ];
+  // عیار (مثل «با عیار ۹۹۹»، «۷۵۰ عیار»، «نقره ۹۹۹:») عدد قیمت نیست
+  const stripPurity = s => s.replace(/(?<![\d,.])\d{2,4}\s*عیار/g, ' ').replace(/(?:با\s*)?عیار\s*\d{2,4}(?![\d,.])/g, ' ').replace(/^\s*(?:750|900|925|950|995|999|9999)(?=\s*[:：\-–]|\s*$)/, ' ');
+  const NUM = /\$?\s*(\d[\d,]*(?:\.\d+)?)/;
+  const unitOf = (numMatch, tail) => /\$/.test(numMatch) || /^\s*(دلار|usd)/i.test(tail) ? 'usd' : /^\s*ریال/.test(tail) ? 'rial' : /^\s*تومان/.test(tail) ? 'toman' : null;
+  const readNum = str => { const nm = str.match(NUM); if (!nm) return null; const val = Number(nm[1].replace(/,/g, ''));
+    return val > 0 ? { val, unit: unitOf(nm[0], str.slice(nm.index + nm[0].length, nm.index + nm[0].length + 14)) } : null; };
   function parsePrices(raw, last) {
     const text = J.normDigits(raw || '').replace(/[\u200c]/g, ' ').replace(/٫/g, '.').replace(/[#_]/g, ' ');
     const found = {}, usdCands = [];
     let date = null;
     const dm = text.match(/(1[34]\d\d)\s*\/\s*(\d{1,2})\s*\/\s*(\d{1,2})/);
     if (dm && +dm[2] >= 1 && +dm[2] <= 12 && +dm[3] >= 1 && +dm[3] <= 31) date = J.jStr(+dm[1], +dm[2], +dm[3]);
-    for (const line of text.split(/\n+/)) {
+    const lines = text.split(/\n/).map(l => l.trim());
+    const isKeyLine = l => RULES.some(r => { const m = l.match(r.re); return m && !(r.lead && /\d/.test(l.slice(0, m.index))); });
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li]; if (!line) continue;
       for (const r of RULES) {
         const m = line.match(r.re); if (!m) continue;
         if (r.not && r.not.test(line)) break;
-        const after = line.slice(m.index + m[0].length);
-        const nm = after.match(/\$?\s*(\d[\d,]*(?:\.\d+)?)/); if (!nm) break;
         // «دلار» و «یورو» فقط وقتی اسم دارایی‌ان که قبل از عدد بیان (نه واحدِ قیمت چیز دیگه)
-        if (r.lead && line.slice(0, m.index).match(/\d/)) break;
-        const val = Number(nm[1].replace(/,/g, ''));
-        if (!(val > 0)) break;
-        const tail = after.slice(nm.index + nm[0].length, nm.index + nm[0].length + 14);
-        const unit = /\$/.test(nm[0]) || /^\s*(دلار|usd)/i.test(tail) ? 'usd' : /^\s*ریال/.test(tail) ? 'rial' : /^\s*تومان/.test(tail) ? 'toman' : null;
+        if (r.lead && /\d/.test(line.slice(0, m.index))) break;
+        const cands = [];
+        const same = readNum(stripPurity(line.slice(m.index + m[0].length)));
+        if (same) cands.push(same);
+        else { // قیمت در خط‌های بعدی (مثل «بیت‌کوین:» و بعد «۸۳٬۴۰۰ دلار» و «۲۰٬۱۸۷… تومان»)
+          for (let k = li + 1; k < lines.length && k <= li + 3; k++) {
+            const nl = lines[k]; if (!nl || isKeyLine(nl)) break;
+            const c = readNum(stripPurity(nl)); if (c) cands.push(c);
+          }
+        }
+        if (!cands.length) break;
         const side = /معامله/.test(line) ? 3 : /فروش/.test(line) ? 2 : /خرید/.test(line) ? 1 : 0;
-        if (r.k === 'usd') usdCands.push({ val, unit, side });
-        else if (r.k === 'btc') { if (!found.btc || (unit === 'usd' && found.btc.unit !== 'usd')) found.btc = { val, unit }; }
-        else if (!found[r.k]) found[r.k] = { val, unit };
+        if (r.k === 'usd') { usdCands.push({ ...cands[0], side }); break; }
+        if (r.k === 'btc') {
+          const pick = cands.find(c => c.unit === 'usd') || cands[0];
+          if (!found.btc || (pick.unit === 'usd' && found.btc.unit !== 'usd')) found.btc = pick;
+          if (!found.btcToman) { const tc = cands.find(c => c.unit === 'toman' || c.unit === 'rial'); if (tc) found.btcToman = tc; }
+          break;
+        }
+        if (!found[r.k]) found[r.k] = cands.find(c => c.unit !== 'usd') || cands[0];
         break;
       }
     }
