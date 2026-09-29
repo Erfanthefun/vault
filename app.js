@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۷';
+  const VERSION = '۸';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -389,7 +389,7 @@
     const overdue = C.openObligations(S, cur, -3, -1);
     const overdueSum = overdue.reduce((s, o) => s + o.amount, 0);
     const byDue = (a, b) => a.due.localeCompare(b.due);
-    const cf = C.cashFlow(S, cur), prevYm = C.addYm(cur, -1), prevCf = C.cashFlow(S, prevYm);
+    const cf = C.cashFlow(S, cur, t), prevYm = C.addYm(cur, -1), prevCf = C.cashFlow(S, prevYm, t);
     const barMax = Math.max(cf.in, cf.out, 1), barW = v => v ? Math.max(2, Math.round(v / barMax * 100)) : 0;
     const pctTxt = r => `<bdi dir="ltr">${r < 0 ? '−' : ''}${faDigits(Math.round(Math.abs(r) * 100))}٪</bdi>`;
     const cred = creditItemsForMonth(C.addYm(cur, -1)).filter(c => !c.paid).concat(creditItemsForMonth(cur));
@@ -406,8 +406,9 @@
     <section class="hero cash" aria-labelledby="heroLabel">
       <p class="hero-label" id="heroLabel">جریان نقدی ${monthName(cur)} تا امروز</p>
       <div class="flow">
-        <div class="fl in"><span>آمد <i>(رسیده)</i></span><b><bdi dir="ltr">${cf.in ? '+' : ''}${money(cf.in, false)}</bdi></b></div>
+        <div class="fl in"><span>آمد</span><b><bdi dir="ltr">${cf.in ? '+' : ''}${money(cf.in, false)}</bdi></b></div>
         <div class="fbar" aria-hidden="true"><i class="in" style="width:${barW(cf.in)}%"></i></div>
+        ${cf.assumed ? `<p class="fparts">${esc(cf.assumedNames.join('، '))} طبق برنامه حساب شده (روزش رسیده ولی «دریافت شد» نخورده).</p>` : ''}
         <div class="fl out"><span>رفت <i>(قسط، قبض، روزمره)</i></span><b><bdi dir="ltr">${cf.out ? '−' : ''}${money(cf.out, false)}</bdi></b></div>
         <div class="fbar" aria-hidden="true"><i class="out" style="width:${barW(cf.out)}%"></i></div>
         ${cf.out ? `<p class="fparts">قسط ${money(cf.loans, false)}، قبض ${money(cf.bills, false)}، روزمره ${money(cf.daily, false)}</p>` : ''}
@@ -418,8 +419,8 @@
         ${cf.rate !== null || prevCf.rate !== null ? `<p class="hero-sub">${cf.rate !== null ? `${pctTxt(cf.rate)} از درآمد` : ''}${cf.rate !== null && prevCf.rate !== null ? '، ' : ''}${prevCf.rate !== null ? `${monthName(prevYm)}: ${pctTxt(prevCf.rate)}` : ''}</p>` : ''}
         ${!cf.in && !cf.out ? `<p class="hero-sub">هنوز واریز یا برداشتی در ${monthName(cur)} ثبت نشده.</p>` : ''}
       </div>
-      ${st.incPending || st.obRemaining || overdueSum ? `<dl class="eq">
-        ${st.incPending ? `<div class="incrow"><dt>درآمد در راه</dt><dd>+${money(st.incPending, false)}</dd></div>` : ''}
+      ${cf.pending || st.obRemaining || overdueSum ? `<dl class="eq">
+        ${cf.pending ? `<div class="incrow"><dt>درآمد در راه</dt><dd>+${money(cf.pending, false)}</dd></div>` : ''}
         ${st.obRemaining ? `<div><dt>تعهدات مانده‌ی ${monthName(cur)}${st.varRemaining ? ' <i>(حدود)</i>' : ''}</dt><dd><bdi dir="ltr">−${money(st.obRemaining, false)}</bdi></dd></div>` : ''}
         ${overdueSum ? `<div class="bad"><dt>عقب‌افتاده از ماه‌های قبل</dt><dd><bdi dir="ltr">−${money(overdueSum, false)}</bdi></dd></div>` : ''}
       </dl>` : ''}

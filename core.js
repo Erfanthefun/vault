@@ -288,11 +288,28 @@
     }
     return o;
   }
-  function cashFlow(state, ymStr) {
-    const o = monthOutflow(state, ymStr);
-    const inc = state.tx.filter(t => t.type === 'income' && ym(t.date) === ymStr).reduce((s, t) => s + t.amount, 0);
-    const net = inc - o.total;
-    return { in: inc, out: o.total, loans: o.loans, bills: o.bills, daily: o.daily, net, rate: inc > 0 ? net / inc : null };
+  // جریان نقدی ماه، بر اساس ماهِ هر تعهد/درآمد (همون‌طور که کاربر فکر می‌کنه):
+  // رفت = همه‌ی قسط‌ها و قبض‌های پرداخت‌شده‌ی این ماه (با مبلغ واقعی؛ «پرداخت‌شده‌ی قبلی» و تیک بدون تراکنش هم حساب می‌شن)
+  //       + برداشت‌های این ماه که به هیچ تعهدی وصل نیستن (روزمره)
+  // آمد  = درآمدهای ثابت دریافت‌شده‌ی این ماه + درآمدهای ثابتی که روزشون رسیده ولی تیک نخورده‌ن (assumed)
+  //       + واریزهای این ماه که به درآمد ثابتی وصل نیستن. انتقال داخلی حساب نمی‌شه.
+  function cashFlow(state, ymStr, todayStr) {
+    const map = txAmountMap(state), refd = new Set();
+    const mark = paid => Object.values(paid || {}).forEach(i => { if (i && i.txId) refd.add(i.txId); });
+    state.loans.forEach(l => mark(l.paid)); state.fixed.forEach(f => mark(f.paid)); (state.incomes || []).forEach(f => mark(f.paid));
+    const obs = obligationsForMonth(state, ymStr, map).filter(o => o.paid);
+    const loans = obs.filter(o => o.kind === 'loan').reduce((s, o) => s + o.amount, 0);
+    const bills = obs.filter(o => o.kind !== 'loan').reduce((s, o) => s + o.amount, 0);
+    const txs = state.tx.filter(t => ym(t.date) === ymStr && !refd.has(t.id));
+    const daily = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const other = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const inc = incomesForMonth(state, ymStr, map);
+    const got = inc.filter(i => i.paid).reduce((s, i) => s + i.amount, 0);
+    const due = inc.filter(i => !i.paid && todayStr && i.due <= todayStr);
+    const assumed = due.reduce((s, i) => s + i.amount, 0);
+    const pending = inc.filter(i => !i.paid && !(todayStr && i.due <= todayStr)).reduce((s, i) => s + i.amount, 0);
+    const tin = got + assumed + other, out = loans + bills + daily, net = tin - out;
+    return { in: tin, out, loans, bills, daily, net, rate: tin > 0 ? net / tin : null, assumed, assumedNames: due.map(i => i.name), pending };
   }
   function categoryTotals(state, ymStr) {
     const m = {};
