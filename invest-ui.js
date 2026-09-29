@@ -63,6 +63,9 @@
   const locName = id => (S.locations.find(l => l.id === id) || {}).name || 'محل حذف‌شده';
   const dateTitle = js => { const { y, m, d } = J.jParse(js); return `${faDigits(d)} ${MONTHS[m - 1]}${y !== J.jParse(today()).y ? ' ' + faDigits(y) : ''}`; };
   const ago = js => { const n = J.diffDays(js, today()); return n <= 0 ? 'امروز' : n === 1 ? 'دیروز' : `${faDigits(n)} روز پیش`; };
+  // «، ساعت ۰۶:۲۷ (خودکار)» برای قیمت‌هایی که از کانال اومدن
+  const autoTag = p => p && p.auto ? `${p.time ? '، ساعت ' + faDigits(p.time) : ''} <span class="autotag">خودکار</span>` : '';
+  const stamp = ts => { const d = new Date(ts); return `${ago(J.toJ(d))}، ساعت ${faDigits(J.pad(d.getHours()) + ':' + J.pad(d.getMinutes()))}`; };
 
   // فیلدها
   function dateField(name, value) {
@@ -125,7 +128,7 @@
       ${P ? `<p class="equiv">${others.map(k => `<b>${fmtLens(pf.total, k, false)}</b> ${LENS[k]}`).join(' یا ')}</p>` : ''}
       ${P && hasOps ? `<div class="pnl"><span class="${pf.pnlR >= 0 ? 'up' : 'down'}">سود و زیان ${localAdj()}: <bdi dir="ltr">${pf.pnlR >= 0 ? '+' : '−'}${faNum(disp(Math.abs(pf.pnlR)))}</bdi> ${LENS.toman}</span>
         <span class="${pf.pnlU >= 0 ? 'up' : 'down'}">دلاری: <bdi dir="ltr">${pf.pnlU >= 0 ? '+' : '−'}${dec(Math.abs(pf.pnlU), Math.abs(pf.pnlU) >= 100 ? 0 : 2)}</bdi> دلار</span></div>` : ''}
-      <div class="seal ${stale !== null && stale >= 3 ? 'stale' : ''}"><span>${P ? `قیمت‌ها: <b>${ago(P.date)}</b>` : 'هنوز قیمتی ثبت نشده'}</span><button data-act="prices">به‌روزرسانی قیمت</button></div>
+      <div class="seal ${stale !== null && stale >= 3 ? 'stale' : ''}"><span>${P ? `قیمت‌ها: <b>${ago(P.date)}</b>${autoTag(P)}` : 'هنوز قیمتی ثبت نشده'}</span><button data-act="prices">به‌روزرسانی قیمت</button></div>
       ${P && hasOps && pf.assets.some(x => x.q > 0 && x.value === null) ? `<p class="nw-warn">قیمت ${pf.assets.filter(x => x.q > 0 && x.value === null).map(x => ASSETS[x.a].name).join('، ')} ثبت نشده و در جمع حساب نشده.</p>` : ''}
     </section>
     ${onboarding ? `<section class="box block"><h2>شروع کار</h2><p class="note">سه قدم تا اینکه گاوصندوقت پر بشه:</p><ol class="onb">
@@ -292,7 +295,7 @@
         : tomanInput('p_' + k, 0, P && P[k] ? faNum(P[k] / 10) : '')).replace('placeholder="۰"', '')).join('')}
       <label class="lbl">تاریخ</label>${dateField('pdate', today())}
       <button class="btn wide" id="psave">ثبت قیمت‌ها</button>
-      ${past.length ? `<details class="fold"><summary>${IC.down}ثبت‌های قبلی</summary><ul class="ledger" style="margin-top:8px">${past.map(p => `<li class="row plain"><span class="main"><strong>${dateTitle(p.date)}</strong>
+      ${past.length ? `<details class="fold"><summary>${IC.down}ثبت‌های قبلی</summary><ul class="ledger" style="margin-top:8px">${past.map(p => `<li class="row plain"><span class="main"><strong>${dateTitle(p.date)}${autoTag(p)}</strong>
         <span>${PRICE_FIELDS.filter(([k]) => p[k]).map(([k, n]) => `${n.replace(' (به دلار)', '').replace('گرم ', '')} ${priceText(k, p[k])}`).join('، ')}</span></span>
         <button class="iconbtn sm" data-delprice="${p.date}" aria-label="حذف ثبت ${dateTitle(p.date)}">${IC.x}</button></li>`).join('')}</ul></details>` : ''}`;
     openSheet('قیمت‌ها', html, ov => {
@@ -311,6 +314,8 @@
       if (pasted) setTimeout(fill, 50);
       $$('[data-delprice]', ov).forEach(b => b.addEventListener('click', () => {
         if (!confirm('این ثبت قیمت حذف بشه؟')) return;
+        const gone = S.prices.find(p => p.date === b.dataset.delprice);
+        if (gone && gone.auto) { const ap = S.settings.autoPrice; ap.skip = ap.skip.filter(d => d !== gone.date).concat([gone.date]).slice(-60); }
         S.prices = S.prices.filter(p => p.date !== b.dataset.delprice); save(); closeSheet(ov); render();
       }));
       once($('#psave', ov), () => {
@@ -575,9 +580,9 @@
         o.in ? ASSETS[o.in.a].name : '', o.in ? (o.in.a === 'irr' ? o.in.q / 10 : q(o.in.q, o.in.a)) : '',
         o.cost != null ? o.cost / 10 : '', o.proceeds != null ? o.proceeds / 10 : '', o.note || ''])),
       'عملیات سرمایه', [12, 12, 16, 16, 14, 14, 14, 14, 18, 18, 24]);
-    add([['تاریخ', 'طلای ۱۸ (تومان/گرم)', 'دلار (تومان)', 'یورو (تومان)', 'تتر (تومان)', 'بیت‌کوین (دلار)', 'نقره‌ی ۹۹۹ (تومان/گرم)']]
-      .concat(S.prices.slice().sort((a, b) => a.date.localeCompare(b.date)).map(p => [p.date, p.gold ? p.gold / 10 : '', p.usd ? p.usd / 10 : '', p.eur ? p.eur / 10 : '', p.usdt ? p.usdt / 10 : '', p.btc || '', p.silver ? p.silver / 10 : ''])),
-      'قیمت‌ها', [12, 16, 14, 14, 14, 16, 16]);
+    add([['تاریخ', 'طلای ۱۸ (تومان/گرم)', 'دلار (تومان)', 'یورو (تومان)', 'تتر (تومان)', 'بیت‌کوین (دلار)', 'نقره‌ی ۹۹۹ (تومان/گرم)', 'منبع']]
+      .concat(S.prices.slice().sort((a, b) => a.date.localeCompare(b.date)).map(p => [p.date, p.gold ? p.gold / 10 : '', p.usd ? p.usd / 10 : '', p.eur ? p.eur / 10 : '', p.usdt ? p.usdt / 10 : '', p.btc || '', p.silver ? p.silver / 10 : '', p.auto ? 'خودکار' + (p.time ? ' ' + p.time : '') : 'دستی'])),
+      'قیمت‌ها', [12, 16, 14, 14, 14, 16, 16, 14]);
   }
 
   // ---------- API ماژول ----------
@@ -600,7 +605,7 @@
         ${owed ? `<div><dt>طلب از اشخاص</dt><dd>${signed(owed, lz)}</dd></div>` : ''}
         <div class="net"><dt>ارزش خالص</dt><dd>${signed(netRial, lz)} ${LENS[lz]}</dd></div>
       </dl>
-      <div class="nwc-seal ${stale !== null && stale >= 3 ? 'stale' : ''}"><span>${P ? `قیمت‌ها: ${ago(P.date)}` : 'قیمتی ثبت نشده'}</span><button class="linkbtn" data-act="prices">به‌روزرسانی</button></div>
+      <div class="nwc-seal ${stale !== null && stale >= 3 ? 'stale' : ''}"><span>${P ? `قیمت‌ها: ${ago(P.date)}${autoTag(P)}` : 'قیمتی ثبت نشده'}</span><button class="linkbtn" data-act="prices">به‌روزرسانی</button></div>
     </div></section>`;
   }
   function view() {
@@ -610,14 +615,62 @@
       <div class="chips seg" role="group" aria-label="بخش‌های سرمایه">${subs.map(([k, n]) => `<button class="chip ${invTab === k ? 'on' : ''}" data-act="invt" data-t="${k}" aria-pressed="${invTab === k}">${n}</button>`).join('')}</div>
       ${body}`;
   }
+  function autoStatus() {
+    const ap = S.settings.autoPrice, lastAuto = S.prices.filter(p => p.auto).sort((a, b) => a.date.localeCompare(b.date)).pop();
+    if (!ap.on) return 'خاموشه. قیمت‌ها رو فقط دستی (با «چسباندن» یا فرم قیمت‌ها) ثبت می‌کنی.';
+    const lines = [];
+    if (lastAuto) lines.push(`آخرین قیمت کانال: ${dateTitle(lastAuto.date)}${lastAuto.time ? '، ساعت ' + faDigits(lastAuto.time) : ''}`);
+    if (ap.err === 'nofile') lines.push('فایل قیمت هنوز روی سایت اپ نیست؛ یعنی دستیار GitHub هنوز یک بار هم اجرا نشده.');
+    else if (ap.err) lines.push('آخرین تلاش برای دریافت ناموفق بود (اینترنت یا سایت در دسترس نبود).');
+    if (ap.last) lines.push(`آخرین بررسی موفق: ${stamp(ap.last)}`);
+    if (!lines.length) lines.push('هر بار که اپ رو با اینترنت باز کنی، قیمت‌های تازه‌ی کانال خودکار ثبت می‌شن.');
+    return lines.join('<br>');
+  }
   function settingsHtml() {
-    return `<section class="block card-block"><h2>محل‌های نگهداری سرمایه</h2>
+    const on = S.settings.autoPrice.on;
+    return `<section class="block card-block"><h2>دریافت خودکار قیمت</h2>
+      <p class="note">قیمت‌ها از کانال تلگرامت (از طریق دستیار GitHub) خودکار ثبت می‌شن. قیمتی که خودت دستی ثبت کنی هیچ‌وقت عوض نمی‌شه.</p>
+      <div class="chips seg" role="group" aria-label="دریافت خودکار قیمت">${[[true, 'روشن'], [false, 'خاموش']].map(([k, n]) => `<button class="chip ${on === k ? 'on' : ''}" data-act="autopx" data-on="${k}" aria-pressed="${on === k}">${n}</button>`).join('')}</div>
+      <p class="note" id="autostatus">${autoStatus()}</p>
+      ${on ? '<button class="btn small" data-act="pullnow">دریافت الان</button>' : ''}</section>
+    <section class="block card-block"><h2>محل‌های نگهداری سرمایه</h2>
       ${S.locations.length ? `<div class="chips wrap">${S.locations.map(l => `<span class="chip tag">${esc(l.name)}<button data-act="dellocname" data-id="${esc(l.id)}" aria-label="ویرایش یا حذف ${esc(l.name)}">${IC.x}</button></span>`).join('')}</div>` : '<p class="note">هنوز محلی تعریف نشده.</p>'}
       <button class="btn small" data-act="locs">افزودن محل</button></section>
     <section class="block card-block"><h2>قیمت شمش</h2>
       <p class="note">اگه شمش رو معمولاً کمی کمتر یا بیشتر از طلای ۱۸ عیار گرمی می‌فروشی، اختلافش رو به درصد بنویس (مثلاً ۲- یعنی ۲٪ کمتر). پیش‌فرض صفره.</p>
       <div class="unitwrap"><input id="baradj" inputmode="decimal" value="${S.settings.barAdj ? dec(S.settings.barAdj, 2) : ''}" placeholder="۰" aria-label="اختلاف قیمت شمش"><span>٪</span></div>
       <button class="btn small" data-act="savebar">ذخیره</button></section>`;
+  }
+  // ---------- دریافت خودکار قیمت ----------
+  // فایل prices.json کنار خود اپ (همون دامنه‌ی github.io) هست؛ پس محدودیت CORS نداره و از ایران هم مثل خود اپ باز می‌شه.
+  let pulling = null, lastTry = 0;
+  function pullPrices(opts = {}) {
+    const ap = S && S.settings.autoPrice;
+    if (!ap || !ap.on) return Promise.resolve(null);
+    if (!opts.force && (location.protocol !== 'https:' || navigator.onLine === false || Date.now() - lastTry < 10 * 60000)) return Promise.resolve(null);
+    if (pulling) return pulling;
+    lastTry = Date.now();
+    pulling = (async () => {
+      let res = null;
+      try {
+        const r = await fetch('prices.json?t=' + Date.now(), { cache: 'no-store' });
+        if (r.status === 404) { ap.err = 'nofile'; }
+        else if (!r.ok) throw new Error('HTTP ' + r.status);
+        else {
+          const feed = await r.json();
+          res = V.mergeAutoPrices(S, feed, today());
+          ap.err = null; ap.last = Date.now();
+        }
+      } catch (e) { ap.err = 'net'; }
+      save();
+      const n = res ? res.added + res.updated : 0;
+      if (n && !document.querySelector('.overlay')) render();
+      else if (App.tab === 'set' && !document.querySelector('.overlay')) render();
+      if (opts.force) toast(n ? `${faDigits(n)} قیمت تازه ثبت شد.` : res ? 'قیمت تازه‌ای نبود؛ همه‌چیز به‌روزه.' : ap.err === 'nofile' ? 'فایل قیمت هنوز روی سایت نیست.' : 'دریافت نشد. اینترنت رو بررسی کن.', res || n ? '' : 'bad');
+      else if (n && res.latest && res.latest.date === today()) toast(`قیمت‌ها خودکار به‌روز شد${res.latest.time ? ' (ساعت ' + faDigits(res.latest.time) + ')' : ''}.`);
+      return res;
+    })().finally(() => { pulling = null; });
+    return pulling;
   }
   function looksLikePrices(text) {
     if (/(موجودی|مانده|حساب شما|از حساب|به حساب)/.test(J.normDigits(text || ''))) return false;
@@ -631,8 +684,10 @@
     asset: b => openAssetDetail(b.dataset.a), loc: b => openLocDetail(b.dataset.id),
     dellocname: b => locMenu(b.dataset.id), invt: b => { invTab = b.dataset.t; render(); window.scrollTo(0, 0); },
     goinv: () => { invTab = 'sum'; App.go('inv'); },
+    autopx: b => { S.settings.autoPrice.on = b.dataset.on === 'true'; if (!S.settings.autoPrice.on) S.settings.autoPrice.err = null; save(); render(); if (S.settings.autoPrice.on) pullPrices({ force: true }); },
+    pullnow: () => pullPrices({ force: true }),
     savebar: () => { const v = Number(J.normDigits($('#baradj').value).replace('٫', '.').replace(/[^\d.\-]/g, '')) || 0; if (Math.abs(v) > 50) { toast('عدد منطقی نیست.', 'bad'); return; } S.settings.barAdj = v; save(); render(); toast('ذخیره شد.'); }
   };
-  window.Inv = { bind: st => { S = st; }, view, homeCard, settingsHtml, excelSheets, looksLikePrices, acts,
+  window.Inv = { bind: st => { S = st; }, view, homeCard, settingsHtml, excelSheets, looksLikePrices, acts, pullPrices,
     openPrices, openOp: t => openOpForm(t), afterRender: root => bindInputs(root) };
 })();

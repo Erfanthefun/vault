@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۵';
+  const VERSION = '۶';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -59,7 +59,7 @@
   function defaults() {
     return {
       v: 2,
-      settings: { unit: 'toman', expectedIncome: 0, lastBackup: null, lens: 'toman', barAdj: 0, lock: null },
+      settings: { unit: 'toman', expectedIncome: 0, lastBackup: null, lens: 'toman', barAdj: 0, lock: null, autoPrice: { on: true, skip: [], last: null, err: null } },
       categories: {
         expense: EXPENSE_CATS.slice(),
         income: ['حقوق', 'پروژه', 'سایر درآمد']
@@ -71,6 +71,9 @@
   function normalize(d) {
     const s = Object.assign(defaults(), d || {});
     s.settings = Object.assign(defaults().settings, s.settings || {});
+    const ap = s.settings.autoPrice && typeof s.settings.autoPrice === 'object' ? s.settings.autoPrice : {};
+    s.settings.autoPrice = { on: ap.on !== false, skip: Array.isArray(ap.skip) ? ap.skip.filter(d => typeof d === 'string').slice(-60) : [],
+      last: typeof ap.last === 'number' ? ap.last : null, err: typeof ap.err === 'string' ? ap.err : null };
     s.categories = Object.assign(defaults().categories, s.categories || {});
     for (const k of ['accounts', 'tx', 'loans', 'fixed', 'debts', 'incomes', 'locations', 'ops', 'goals']) s[k] = Array.isArray(s[k]) ? s[k].filter(x => x && typeof x === 'object' && x.id) : [];
     s.prices = Array.isArray(s.prices) ? s.prices.filter(p => p && /^\d{4}\/\d{2}\/\d{2}$/.test(p.date || '')) : [];
@@ -1749,6 +1752,7 @@
     if (document.hidden) { hiddenAt = Date.now(); return; }
     if (S.settings.lock && hiddenAt && Date.now() - hiddenAt > 60000) showLock();
     if (!$('.overlay')) render();
+    if (window.Inv) window.Inv.pullPrices();
   });
 
   // ---------- شروع ----------
@@ -1757,6 +1761,7 @@
     get tab() { return tab; }, debtTotals, loanRemaining: () => S.loans.reduce((s, l) => s + C.loanSummary(l).remainingAmount, 0) };
   try { history.replaceState({ tab: 'home' }, ''); } catch (e) { /* */ }
   load(); render(); showLock(); route();
+  if (window.Inv) window.Inv.pullPrices();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   window.__hesab = window.__vault = { get state() { return S; }, encryptJSON, decryptJSON }; // برای تست

@@ -1,5 +1,5 @@
 // کش آفلاین Vault. فقط کش‌های خودش (پیشوند vault-) رو پاک می‌کنه تا به اپ‌های دیگه‌ی همین دامنه (مثل FI) دست نزنه.
-const VERSION = 'vault-v5';
+const VERSION = 'vault-v6';
 const FILES = ['./', 'index.html', 'core.js', 'invest.js', 'invest-ui.js', 'app.js', 'xlsx.full.min.js', 'manifest.webmanifest',
   'fonts/vazirmatn.woff2', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
@@ -8,5 +8,7 @@ self.addEventListener('activate', e => {
 });
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // قیمت‌های خودکار همیشه از اینترنت خونده می‌شن و هیچ‌وقت کش نمی‌شن
+  if (new URL(e.request.url).pathname.endsWith('/prices.json')) return;
   e.respondWith(caches.match(e.request, { ignoreSearch: true }).then(hit => hit || fetch(e.request).catch(() => caches.match('index.html'))));
 });

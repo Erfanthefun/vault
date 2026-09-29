@@ -286,6 +286,52 @@
     return out;
   }
 
+  // ---------- قیمت خودکار (فایل prices.json که دستیار GitHub از کانال تلگرام می‌سازه) ----------
+  // قواعد: ثبت دستی هیچ‌وقت عوض نمی‌شه؛ ثبت خودکارِ یک روز فقط با پیام جدیدترِ همون روز عوض می‌شه؛
+  // روزهایی که کاربر ثبت خودکارشون رو حذف کرده (skip) دوباره اضافه نمی‌شن؛ فقط ۱۴ روز اخیر؛
+  // قیمتی که بیش از ۳ برابر با قبلی فرق داشته باشه رد می‌شه (احتمال خطای خواندن).
+  const DATE_RE = /^1[34]\d\d\/(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])$/;
+  const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+  function cleanFeedItem(it) {
+    if (!it || typeof it !== 'object' || !DATE_RE.test(it.date || '')) return null;
+    const out = { date: it.date, time: TIME_RE.test(it.time || '') ? it.time : null, post: Number.isInteger(it.post) && it.post > 0 ? it.post : 0 };
+    let n = 0;
+    for (const k of PRICE_KEYS) {
+      const v = it[k];
+      if (typeof v === 'number' && isFinite(v) && v > 0 && v < 1e15) { out[k] = k === 'btc' ? Math.round(v * 100) / 100 : Math.round(v); n++; }
+    }
+    return n ? out : null;
+  }
+  function mergeAutoPrices(state, feed, todayStr, opts) {
+    const res = { added: 0, updated: 0, rejected: 0, latest: null };
+    if (!feed || !Array.isArray(feed.items) || !J) return res;
+    const ap = (state.settings && state.settings.autoPrice) || {};
+    const skip = new Set(Array.isArray(ap.skip) ? ap.skip : []);
+    const days = (opts && opts.days) || 14, from = J.addDays(todayStr, -days);
+    const items = feed.items.slice(0, 400).map(cleanFeedItem).filter(it => it && it.date <= todayStr && it.date >= from && !skip.has(it.date))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.post - b.post);
+    for (const it of items) {
+      const cur = state.prices.find(p => p.date === it.date);
+      if (cur && !cur.auto) continue;                                   // دستی مقدمه
+      const entered = {}; for (const k of PRICE_KEYS) if (it[k]) entered[k] = it[k];
+      if (cur && cur.auto) {                                            // فقط پیام تازه‌تر یا ویرایش‌شده
+        if (it.post < (cur.post || 0)) continue;
+        if (it.post === (cur.post || 0) && (it.time || null) === (cur.time || null) && Object.keys(entered).every(k => cur[k] === entered[k])) continue;
+      }
+      const base = state.prices.filter(p => p.date < it.date).sort((a, b) => a.date.localeCompare(b.date)).pop() || {};
+      if (Object.keys(entered).some(k => base[k] && (entered[k] / base[k] > 3 || entered[k] / base[k] < 1 / 3))) { res.rejected++; continue; }
+      const rec = { date: it.date, auto: true };
+      if (it.time) rec.time = it.time;
+      if (it.post) rec.post = it.post;
+      for (const k of PRICE_KEYS) if (entered[k] || base[k]) rec[k] = entered[k] || base[k];
+      state.prices = state.prices.filter(p => p.date !== it.date).concat([rec]);
+      state.prices.filter(p => p.date > it.date).forEach(p => { for (const k of PRICE_KEYS) if (!p[k] && rec[k]) p[k] = rec[k]; });
+      if (cur) res.updated++; else res.added++;
+      res.latest = rec;
+    }
+    return res;
+  }
+
   root.V = { ASSETS, ORDER, PRICE_KEYS, usdRate, parseQty, fmtQty, latestPrice, priceAt, unitRial, valueRial, replay, portfolio, lens,
-    idleCash, whatIf, history, goalProgress, parsePrices, opSort };
+    idleCash, whatIf, history, goalProgress, parsePrices, opSort, cleanFeedItem, mergeAutoPrices };
 })(typeof window !== 'undefined' ? window : globalThis);
