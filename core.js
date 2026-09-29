@@ -288,6 +288,12 @@
     }
     return o;
   }
+  function cashFlow(state, ymStr) {
+    const o = monthOutflow(state, ymStr);
+    const inc = state.tx.filter(t => t.type === 'income' && ym(t.date) === ymStr).reduce((s, t) => s + t.amount, 0);
+    const net = inc - o.total;
+    return { in: inc, out: o.total, loans: o.loans, bills: o.bills, daily: o.daily, net, rate: inc > 0 ? net / inc : null };
+  }
   function categoryTotals(state, ymStr) {
     const m = {};
     for (const t of state.tx) if (t.type === 'expense' && ym(t.date) === ymStr) { const c = t.cat || 'سایر'; m[c] = (m[c] || 0) + t.amount; }
@@ -391,6 +397,6 @@
 
   root.Core = { toJ, toG, today, ym, addMonths, addYm, addDays, diffDays, monthLen, jParse, jStr, pad,
     MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomesForMonth, openObligations, monthStats, loanDue, loanSummary,
-    ymIndex, monthOutflow, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis };
+    ymIndex, monthOutflow, cashFlow, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis };
   root.J = root.Core;
 })(typeof window !== 'undefined' ? window : globalThis);

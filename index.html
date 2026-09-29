@@ -67,22 +67,13 @@ main { max-width: 560px; margin: 0 auto; padding: 4px 16px 128px; }
 .hero::after { content: ""; position: absolute; inset-inline-start: -60px; top: -80px; width: 220px; height: 220px; border-radius: 50%;
   background: var(--hero-2); z-index: -1; opacity: .8; }
 .hero-label { margin: 0; font-size: .92rem; color: var(--on-hero-2); }
-.hero-num { margin: 2px 0 0; display: flex; align-items: baseline; gap: 8px; }
-#heroNum { font-size: clamp(2.3rem, 11.5vw, 3.2rem); font-weight: 800; line-height: 1.12; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.hero-num { margin: 2px 0 0; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
+#heroNum { font-size: clamp(1.9rem, 9.5vw, 3rem); font-weight: 800; line-height: 1.12; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .hero-num small { font-size: .95rem; color: var(--on-hero-2); }
 .meter { height: 8px; border-radius: 99px; background: rgba(255,255,255,.14); margin: 14px 0 8px; overflow: hidden; }
 .meter i { display: block; height: 100%; border-radius: 99px; background: #7FE0CF; transition: width .5s var(--ease-out); }
 .meter.light { background: var(--surface-2); margin: 12px 0; } .meter.light i { background: var(--brand); }
 .hero-sub { margin: 0; font-size: .84rem; color: var(--on-hero-2); }
-.strip { display: flex; gap: 2px; margin: 14px 0 2px; }
-.strip .day { flex: 1; display: grid; justify-items: center; gap: 3px; min-width: 0; padding-top: 3px; border-radius: 6px; }
-.strip .day i { display: block; width: 7px; height: 7px; border-radius: 50%; }
-.strip .dot.p { background: #7FE0CF; }
-.strip .dot.u { box-shadow: inset 0 0 0 1.5px #F2C46B; }
-.strip .dot.l { background: #FF8A9B; }
-.strip .day small { font-size: .62rem; color: var(--on-hero-2); line-height: 1; }
-.strip .day.today { background: rgba(255,255,255,.12); }
-.strip .day.today small { color: var(--on-hero); font-weight: 700; }
 .eq { margin: 14px 0 0; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.14); display: grid; gap: 4px; }
 .eq div { display: flex; justify-content: space-between; gap: 10px; font-size: .9rem; }
 .eq dt { color: var(--on-hero-2); } .eq dt i { font-style: normal; font-size: .78rem; opacity: .85; }
@@ -113,6 +104,7 @@ main { max-width: 560px; margin: 0 auto; padding: 4px 16px 128px; }
 .count { font-size: .8rem; color: var(--muted); }
 .card-block { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px; box-shadow: var(--shadow); margin-top: 14px; }
 .empty, .note { color: var(--muted); font-size: .88rem; margin: 6px 0; }
+.dval { color: var(--muted); font-size: .8rem; font-weight: 500; white-space: nowrap; }
 .autotag { display: inline-block; font-size: .72rem; font-weight: 700; line-height: 1.5; padding: 0 7px; margin-inline-start: 4px; border: 1px solid currentColor; border-radius: 999px; vertical-align: 1px; white-space: nowrap; }
 .footnote { color: var(--muted); font-size: .8rem; text-align: center; margin: 26px 12px 0; }
 
@@ -578,6 +570,16 @@ textarea { min-height: 130px; margin-top: 12px; resize: vertical; }
 .sheet .grp { margin: 18px 2px 8px; } .sheet .grp:first-child { margin-top: 2px; }
 /* خانه: درآمد و مانده برای خرج */
 .eq .incrow dd { color: #9FE3BC; }
+.flow { margin: 12px 0 0; display: grid; gap: 5px; }
+.fl { display: flex; justify-content: space-between; gap: 10px; font-size: .9rem; }
+.fl span { color: var(--on-hero-2); } .fl span i { font-style: normal; font-size: .78rem; }
+.fl b { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fl.in b { color: #9FE3BC; }
+.fbar { height: 8px; border-radius: 99px; background: rgba(255,255,255,.1); overflow: hidden; margin-bottom: 4px; }
+.fbar i { display: block; height: 100%; border-radius: 99px; transition: width .5s var(--ease-out); }
+.fbar i.in { background: #7FE0CF; } .fbar i.out { background: #FF8A9B; }
+.fparts { margin: 0; font-size: .78rem; color: var(--on-hero-2); }
+.hero.cash .save { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.14); }
 .eq .free dt { color: var(--on-hero); font-weight: 700; }
 .perday { margin: 2px 0 0; font-size: .8rem; color: var(--on-hero-2); text-align: end; }
 .ob.inc .tick { border-color: var(--good); }

@@ -189,7 +189,8 @@
     switch (o.type) {
       case 'buy': return `خرید ${A(o.in)}`; case 'sell': return `فروش ${A(o.out)}`; case 'swap': return `${A(o.out)} به ${A(o.in)}`;
       case 'transfer': return `انتقال ${A(o.out)}`; case 'open': return `موجودی اولیه‌ی ${A(o.in)}`;
-      case 'gift_in': return `هدیه: ${A(o.in)}`; case 'gift_out': return `هدیه دادم: ${A(o.out)}`; default: return OPS[o.type].t;
+      case 'gift_in': return o.debt ? `دریافت طلب: ${A(o.in)}` : `هدیه: ${A(o.in)}`;
+      case 'gift_out': return o.debt ? `پرداخت بدهی: ${A(o.out)}` : `هدیه دادم: ${A(o.out)}`; default: return OPS[o.type].t;
     }
   }
   function opRow(o) {
@@ -641,6 +642,60 @@
       <div class="unitwrap"><input id="baradj" inputmode="decimal" value="${S.settings.barAdj ? dec(S.settings.barAdj, 2) : ''}" placeholder="۰" aria-label="اختلاف قیمت شمش"><span>٪</span></div>
       <button class="btn small" data-act="savebar">ذخیره</button></section>`;
   }
+  // ---------- بدهی و طلب به هر واحد دارایی ----------
+  // مقدار بدهی/طلب به واحد پایه‌ی همون دارایی ذخیره می‌شه (ریال برای تومان، میلی‌گرم برای طلا، سنت برای دلار…)
+  const DEBT_ASSETS = ['irr', 'gold', 'bar', 'silver', 'usd', 'eur', 'usdt', 'btc'];
+  const debtAssetName = a => a === 'irr' ? 'تومان' : ASSETS[a].name;
+  // ارزش امروز به ریال (null یعنی برای این دارایی هنوز قیمتی ثبت نشده)
+  function valueNow(a, q) {
+    if (a === 'irr') return q;
+    const P = V.latestPrice(S); if (!P) return null;
+    const v = V.valueRial(a, q, P, S.settings); return v === null ? null : Math.round(v);
+  }
+  const plainQty = (q, a) => { const b = ASSETS[a].base, dec = Math.round(Math.log10(b)); return dec ? (q / b).toFixed(dec).replace(/\.?0+$/, '') : String(q / b); };
+  function debtSettleHtml(d, left) {
+    const a = d.asset, owe = d.dir === 'owe', pref = S.settings.debtSettle || {};
+    const mode = pref.mode === 'none' || (!pref.mode && !S.locations.length) ? 'none' : 'asset';
+    const loc = S.locations.some(l => l.id === pref.loc) ? pref.loc : (S.locations[0] || {}).id;
+    return `<label class="lbl" for="sqty">مقدار ${owe ? 'پرداخت' : 'دریافت'} (${esc(faUnit(a))})</label>
+      <input id="sqty" inputmode="decimal" autocomplete="off" dir="ltr" value="${esc(plainQty(left, a))}">
+      <p class="note">برای تسویه‌ی بخشی از ${esc(ASSETS[a].name)}، عدد رو کمتر کن.</p>
+      <label class="lbl">${esc(ASSETS[a].name)} ${owe ? 'از کجا اومد؟' : 'کجا رفت؟'}</label>
+      <div class="chips seg" id="smode" role="group" aria-label="اثر تسویه روی دارایی‌ها">${[['asset', owe ? 'از دارایی‌ام کم بشه' : 'به دارایی‌ام اضافه بشه'], ['none', 'فقط ثبت']].map(([k, n]) =>
+        `<button type="button" class="chip ${mode === k ? 'on' : ''}" data-m="${k}" aria-pressed="${mode === k}">${n}</button>`).join('')}</div>
+      <div id="slocw" ${mode === 'asset' ? '' : 'hidden'}><label class="lbl" for="sloc">${owe ? 'از کدوم محل؟' : 'کجا نگهش می‌داری؟'}</label><select id="sloc" class="locsel">${locOptions(loc)}</select></div>`;
+  }
+  function debtSettleBind(ov) {
+    const seg = $('#smode', ov); if (!seg) return;
+    bindNewLoc(ov);
+    seg.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b) return;
+      $$('#smode .chip', ov).forEach(c => { c.classList.toggle('on', c === b); c.setAttribute('aria-pressed', c === b); });
+      $('#slocw', ov).hidden = b.dataset.m !== 'asset'; });
+  }
+  // خروجی: { q, op } یا { err }
+  function debtSettleBuild(ov, d, left, date) {
+    const a = d.asset, owe = d.dir === 'owe';
+    let q = V.parseQty($('#sqty', ov).value, a);
+    if (!q) return { err: 'مقدار رو وارد کن.' };
+    q = Math.min(q, left);
+    const on = $('#smode .chip.on', ov), mode = on ? on.dataset.m : 'none', loc = $('#sloc', ov) ? $('#sloc', ov).value : '';
+    S.settings.debtSettle = { mode, loc: loc || (S.settings.debtSettle || {}).loc || '' };
+    if (mode !== 'asset') return { q, op: null };
+    if (!S.locations.some(l => l.id === loc)) return { err: 'محل نگهداری رو انتخاب کن.' };
+    const op = { id: uid(), created: Date.now(), date, type: owe ? 'gift_out' : 'gift_in', loc, debt: d.id, note: `${owe ? 'پرداخت بدهی به' : 'دریافت طلب از'} ${d.person}` };
+    if (owe) {
+      op.out = { a, q };
+      const R = V.replay(S, null, op);
+      if (R.errors.length) return { err: `در «${locName(loc)}» این مقدار ${ASSETS[a].name} نداری. «فقط ثبت» رو بزن یا محل دیگه‌ای انتخاب کن.` };
+    } else {
+      op.in = { a, q };
+      const v = V.valueRial(a, q, V.priceAt(S, date), S.settings);
+      if (!v) return { err: `برای ${ASSETS[a].name} قیمتی ثبت نشده؛ اول قیمت رو ثبت کن یا «فقط ثبت» رو بزن.` };
+      op.cost = Math.round(v); // مثل هدیه: بها = ارزش روز دریافت
+    }
+    return { q, op };
+  }
+
   // ---------- دریافت خودکار قیمت ----------
   // فایل prices.json کنار خود اپ (همون دامنه‌ی github.io) هست؛ پس محدودیت CORS نداره و از ایران هم مثل خود اپ باز می‌شه.
   let pulling = null, lastTry = 0;
@@ -680,7 +735,9 @@
   const acts = {
     lens: b => { S.settings.lens = b.dataset.l; save(); render(); },
     prices: () => openPrices(), locs: openLocs, opchooser: openChooser, goal: b => openGoal(b.dataset.id),
-    op: b => openOpForm(b.dataset.type), editop: b => openOpForm(null, b.dataset.id), opf: b => { opFilter = b.dataset.f; render(); },
+    op: b => openOpForm(b.dataset.type), editop: b => { const o = S.ops.find(x => x.id === b.dataset.id);
+      if (o && o.debt) { toast('این عملیات از تسویه‌ی بدهی و طلب ساخته شده؛ از همون‌جا (برنامه › بدهی و طلب) حذفش کن.'); return; }
+      openOpForm(null, b.dataset.id); }, opf: b => { opFilter = b.dataset.f; render(); },
     asset: b => openAssetDetail(b.dataset.a), loc: b => openLocDetail(b.dataset.id),
     dellocname: b => locMenu(b.dataset.id), invt: b => { invTab = b.dataset.t; render(); window.scrollTo(0, 0); },
     goinv: () => { invTab = 'sum'; App.go('inv'); },
@@ -689,5 +746,6 @@
     savebar: () => { const v = Number(J.normDigits($('#baradj').value).replace('٫', '.').replace(/[^\d.\-]/g, '')) || 0; if (Math.abs(v) > 50) { toast('عدد منطقی نیست.', 'bad'); return; } S.settings.barAdj = v; save(); render(); toast('ذخیره شد.'); }
   };
   window.Inv = { bind: st => { S = st; }, view, homeCard, settingsHtml, excelSheets, looksLikePrices, acts, pullPrices,
+    DEBT_ASSETS, debtAssetName, valueNow, qtyTxt, plainQty, faUnit, debtSettleHtml, debtSettleBind, debtSettleBuild,
     openPrices, openOp: t => openOpForm(t), afterRender: root => bindInputs(root) };
 })();
