@@ -412,8 +412,47 @@
     };
   }
 
+  // ---------- موجودی حساب‌ها ----------
+  // موجودی = آخرین موجودی قطعی (پیامک یا ورود دستی) ± تراکنش‌های این حساب که بعد از اون لحظه‌ان.
+  // لنگر: a.balance (ریال)، a.stamp ('YYYY/MM/DD HH:MM'، لحظه‌ای که موجودی درست بوده)، a.at (میلی‌ثانیه‌ی ثبت لنگر).
+  // لنگرِ قدیمی بدون stamp و at (ورود دستی نسخه‌های قبل) = همه‌ی تراکنش‌های حساب بعدش حساب می‌شن.
+  // انتقال: account = «از حساب»، to = «به حساب» (خالی = بیرون از حساب‌های بانکی).
+  // انتقال قدیمی (بدون فیلد to): برداشت از account، مگر دریافت طلب که واریز به account بود.
+  function txAccountDelta(t, accId, debts) {
+    const amt = t.amount || 0;
+    if (t.type === 'expense') return t.account === accId ? -amt : 0;
+    if (t.type === 'income') return t.account === accId ? amt : 0;
+    if (t.type !== 'transfer') return 0;
+    if (!('to' in t)) {
+      if (t.account !== accId) return 0;
+      const d = t.debt && (debts || []).find(x => x.id === t.debt);
+      return d && d.dir === 'owed' ? amt : -amt;
+    }
+    let v = 0;
+    if (t.account === accId) v -= amt;
+    if (t.to === accId) v += amt;
+    return v;
+  }
+  function afterAnchor(t, a) {
+    if (!a.stamp) return a.at ? (t.created || 0) > a.at : true;
+    const [ad, atime] = a.stamp.split(' ');
+    if (t.date !== ad) return t.date > ad;
+    if (t.time && atime && atime !== '00:00') return t.time > atime;
+    return (t.created || 0) > (a.at || 0);
+  }
+  function accountBalance(state, a) {
+    if (!a || a.balance === null || a.balance === undefined) return null;
+    let delta = 0, n = 0;
+    for (const t of state.tx) {
+      const d = txAccountDelta(t, a.id, state.debts);
+      if (!d || !afterAnchor(t, a)) continue;
+      delta += d; n++;
+    }
+    return { balance: a.balance + delta, base: a.balance, delta, n };
+  }
+
   root.Core = { toJ, toG, today, ym, addMonths, addYm, addDays, diffDays, monthLen, jParse, jStr, pad,
     MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomesForMonth, openObligations, monthStats, loanDue, loanSummary,
-    ymIndex, monthOutflow, cashFlow, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis };
+    ymIndex, monthOutflow, cashFlow, txAccountDelta, afterAnchor, accountBalance, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis };
   root.J = root.Core;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -146,7 +146,7 @@
       <div class="alloc" role="img" aria-label="ترکیب دارایی">${pf.assets.filter(x => x.value > 0).map(x => `<i class="k-${x.a}" style="width:${x.value / allocTotal * 100}%"></i>`).join('')}</div>
       <div class="legend">${pf.assets.filter(x => x.value > 0).map(x => `<span><i class="k-${x.a}"></i>${aName(x.a)} <b>${dec(x.value / allocTotal * 100, 0)}٪</b></span>`).join('')}</div></section>
     <section class="block"><h2>بر اساس محل</h2><ul class="ledger">${bank ? `<li><button class="row" data-act="goset"><i class="key k-bank"></i>
-        <span class="main"><strong>حساب‌های بانکی</strong><span>${App.bankAccounts().filter(a => a.balance > 0).map(a => esc(a.name)).join('، ')}</span></span>
+        <span class="main"><strong>حساب‌های بانکی</strong><span>${App.bankAccounts().filter(a => App.curBal(a) > 0).map(a => esc(a.name)).join('، ')}</span></span>
         <span class="side"><b>${fmtLens(bank)}</b></span></button></li>` : ''}${pf.byLoc.filter(x => ORDER.some(a => (x.h[a] || 0) !== 0)).sort((a, b) => b.value - a.value).map(x => `
       <li><button class="row" data-act="loc" data-id="${esc(x.loc.id)}"><i class="key" style="background:var(--gold)"></i>
         <span class="main"><strong>${esc(x.loc.name)}</strong><span>${ORDER.filter(a => x.h[a]).map(a => qtyTxt(x.h[a], a)).join('، ')}</span></span>
