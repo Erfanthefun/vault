@@ -220,17 +220,46 @@
     return list.sort((a, b) => a.due.localeCompare(b.due) || a.name.localeCompare(b.name));
   }
 
+  // واریزهای بی‌پیوندی که در واقع همون درآمد ثابت‌اند (مثلاً حقوق با «ثبت واریز» بدون انتخاب درآمد ثابت).
+  // شرط: تا ۱۰ روز فاصله از روز مورد انتظار و مبلغ تا ۲۰٪ نزدیک (یا هم‌دسته). هر واریز فقط به یک ماهِ یک درآمد؛
+  // نزدیک‌ترین مبلغ و تاریخ اول. کاربر می‌تونه با noMatch یه واریز رو از این کار بیرون بذاره. داده عوض نمی‌شه.
+  function incomeMatches(state) {
+    const out = new Map(), used = new Set(), incs = state.incomes || [];
+    if (!incs.length) return out;
+    const refd = new Set();
+    const mark = paid => Object.values(paid || {}).forEach(i => { if (i && i.txId) refd.add(i.txId); });
+    (state.loans || []).forEach(l => mark(l.paid)); (state.fixed || []).forEach(f => mark(f.paid)); incs.forEach(f => mark(f.paid));
+    const cands = [];
+    for (const t of state.tx) {
+      if (t.type !== 'income' || t.link || t.debt || t.noMatch || refd.has(t.id)) continue;
+      const tym = ym(t.date);
+      for (const f of incs) for (const m of [addYm(tym, -1), tym, addYm(tym, 1)]) {
+        if ((f.start && m < f.start) || (f.end && m > f.end) || (f.paid && f.paid[m])) continue;
+        const [y, mo] = m.split('/').map(Number), due = jStr(y, mo, Math.min(f.day, monthLen(y, mo)));
+        const dist = Math.abs(diffDays(t.date, due)); if (dist > 10) continue;
+        const near = !!f.amount && Math.abs(t.amount - f.amount) <= f.amount * 0.2;
+        if (!near && !(f.cat && t.cat === f.cat)) continue;
+        cands.push({ key: f.id + '|' + m, tx: t, dist, near: near ? 1 : 0, gap: Math.abs(t.amount - f.amount) });
+      }
+    }
+    cands.sort((a, b) => (b.near - a.near) || a.dist - b.dist || a.gap - b.gap);
+    for (const c of cands) if (!out.has(c.key) && !used.has(c.tx.id)) { out.set(c.key, c.tx); used.add(c.tx.id); }
+    return out;
+  }
+
   // درآمدهای ثابت ماه (حقوق، اجاره‌ای که می‌گیری…): amount = مبلغ واقعی اگه دریافت شده، وگرنه مبلغ مورد انتظار
-  function incomesForMonth(state, ymStr, txMap) {
-    txMap = txMap || txAmountMap(state);
+  function incomesForMonth(state, ymStr, txMap, matches) {
+    txMap = txMap || txAmountMap(state); matches = matches || incomeMatches(state);
     const [y, m] = ymStr.split('/').map(Number), out = [];
     for (const f of (state.incomes || [])) {
       if (f.start && ymStr < f.start) continue;
       if (f.end && ymStr > f.end) continue;
       const info = f.paid && f.paid[ymStr];
-      const got = info ? (info.txId && txMap.has(info.txId) ? txMap.get(info.txId) : f.amount) : f.amount;
+      const auto = !info && matches.get(f.id + '|' + ymStr);
+      const got = info ? (info.txId && txMap.has(info.txId) ? txMap.get(info.txId) : f.amount) : auto ? auto.amount : f.amount;
       out.push({ kind: 'income', id: f.id, key: ymStr, name: f.name, sub: f.variable ? 'درآمد متغیر، پیش‌بینی' : 'درآمد ثابت',
-        estimate: f.amount, amount: got, due: jStr(y, m, Math.min(f.day, monthLen(y, m))), paid: !!info, variable: !!f.variable });
+        estimate: f.amount, amount: got, due: jStr(y, m, Math.min(f.day, monthLen(y, m))), paid: !!info || !!auto, variable: !!f.variable,
+        auto: auto ? { txId: auto.id, date: auto.date } : null });
     }
     return out.sort((a, b) => a.due.localeCompare(b.due));
   }
@@ -297,13 +326,14 @@
     const map = txAmountMap(state), refd = new Set();
     const mark = paid => Object.values(paid || {}).forEach(i => { if (i && i.txId) refd.add(i.txId); });
     state.loans.forEach(l => mark(l.paid)); state.fixed.forEach(f => mark(f.paid)); (state.incomes || []).forEach(f => mark(f.paid));
+    const matches = incomeMatches(state); for (const t of matches.values()) refd.add(t.id);
     const obs = obligationsForMonth(state, ymStr, map).filter(o => o.paid);
     const loans = obs.filter(o => o.kind === 'loan').reduce((s, o) => s + o.amount, 0);
     const bills = obs.filter(o => o.kind !== 'loan').reduce((s, o) => s + o.amount, 0);
     const txs = state.tx.filter(t => ym(t.date) === ymStr && !refd.has(t.id));
     const daily = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
     const other = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const inc = incomesForMonth(state, ymStr, map);
+    const inc = incomesForMonth(state, ymStr, map, matches);
     const got = inc.filter(i => i.paid).reduce((s, i) => s + i.amount, 0);
     const due = inc.filter(i => !i.paid && todayStr && i.due <= todayStr);
     const assumed = due.reduce((s, i) => s + i.amount, 0);
@@ -393,7 +423,11 @@
     const loanObPrev = stp.obs.filter(o => o.kind === 'loan').reduce((s, o) => s + o.amount, 0);
     const debtNow = state.loans.reduce((s, l) => s + loanSummary(l).remainingAmount, 0);
     const free = debtFreeYm(state);
-    const income = st.base;
+    // درآمد = «آمد» همون جریان نقدی صفحه‌ی خانه (درآمد ثابت تیک‌خورده یا رسیده + واریزهای آزاد)؛
+    // اگه هنوز چیزی نرسیده، درآمد پیش‌بینی تنظیمات
+    const cf = cashFlow(state, ymStr, todayStr);
+    const expected = (state.settings && state.settings.expectedIncome) || 0;
+    const income = cf.in > 0 ? cf.in : expected;
     return {
       ym: ymStr, prev, days, len, isCur,
       progress: st.count ? st.obPaid / st.obTotal : null, paidCount: st.paidCount, count: st.count,
@@ -408,7 +442,7 @@
       loanShare: out.total ? out.loans / out.total : null,
       income, hasIncome: income > 0,
       dti: income ? loanOb / income : null,
-      savingsRate: income ? (income - out.total) / income : null
+      savingsRate: income ? (income - cf.out) / income : null, cashOut: cf.out
     };
   }
 
@@ -452,7 +486,7 @@
   }
 
   root.Core = { toJ, toG, today, ym, addMonths, addYm, addDays, diffDays, monthLen, jParse, jStr, pad,
-    MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomesForMonth, openObligations, monthStats, loanDue, loanSummary,
+    MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomeMatches, incomesForMonth, openObligations, monthStats, loanDue, loanSummary,
     ymIndex, monthOutflow, cashFlow, txAccountDelta, afterAnchor, accountBalance, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis };
   root.J = root.Core;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۹';
+  const VERSION = '۱۰';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -13,23 +13,23 @@
   const reduceMotion = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // ---------- آیکون‌ها (SVG؛ جهتشون در راست‌به‌چپ آینه نمی‌شه) ----------
-  const svg = (d, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const svg = (d, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const IC = {
     right: svg('<path d="m9 5 7 7-7 7"/>'),
     left: svg('<path d="m15 5-7 7 7 7"/>'),
-    check: svg('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
-    out: svg('<path d="M12 19V5M6 11l6-6 6 6"/>'),
-    in: svg('<path d="M12 5v14M6 13l6 6 6-6"/>'),
-    paste: svg('<rect x="7" y="4" width="10" height="4" rx="1.5"/><path d="M8 6H6.5A1.5 1.5 0 0 0 5 7.5v11A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-11A1.5 1.5 0 0 0 17.5 6H16M9 13h6M9 16.5h4"/>'),
-    cal: svg('<rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4"/>'),
-    x: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
+    check: svg('<path d="M20 6 9 17l-5-5"/>'),
+    out: svg('<path d="M7 17 17 7M8 7h9v9"/>'),
+    in: svg('<path d="M17 7 7 17M16 17H7V8"/>'),
+    paste: svg('<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1M16 4h2a2 2 0 0 1 2 2v2M11 14h10M17 10l4 4-4 4"/>'),
+    cal: svg('<rect x="3" y="4" width="18" height="18" rx="2.5"/><path d="M8 2v4M16 2v4M3 10h18"/>'),
+    x: svg('<path d="M18 6 6 18M6 6l12 12"/>'),
     plus: svg('<path d="M12 5v14M5 12h14"/>'),
-    swap: svg('<path d="M7 7h11l-3-3M17 17H6l3 3"/>'),
-    chart: svg('<path d="M5 20V11M12 20V5M19 20v-7"/>'),
+    swap: svg('<path d="M8 3 4 7l4 4M4 7h16M16 21l4-4-4-4M20 17H4"/>'),
+    chart: svg('<path d="M3 3v16a2 2 0 0 0 2 2h16M18 17V9M13 17V5M8 17v-3"/>'),
     search: svg('<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>'),
-    gift: svg('<rect x="4" y="9" width="16" height="11" rx="1.5"/><path d="M4 13h16M12 9v11M12 9c-2-4-6-4-6-1.5S10 9 12 9zm0 0c2-4 6-4 6-1.5S14 9 12 9z"/>'),
-    salary: svg('<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9v.01M18 15v.01"/>'),
-    gear: svg('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>'),
+    gift: svg('<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/>'),
+    salary: svg('<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>'),
+    gear: svg('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'),
     down: svg('<path d="m6 9 6 6 6-6"/>')
   };
 
@@ -392,7 +392,7 @@
       <button class="tick" data-act="${o.paid ? 'unpay' : 'quickpay'}" data-k="${o.kind}" data-id="${esc(o.id)}" data-key="${esc(o.key)}"
         aria-label="${o.paid ? (inc ? 'برگرداندن دریافت' : 'برگرداندن پرداخت') : (inc ? 'دریافت' : 'پرداخت')} ${esc(o.name)}" aria-pressed="${o.paid}">${IC.check}</button>
       <button class="ob-body" data-act="pay" data-k="${o.kind}" data-id="${esc(o.id)}" data-key="${esc(o.key)}">
-        <span class="ob-main"><strong>${esc(o.name)}</strong><span>${o.sub}، ${dateTitle(o.due)}</span></span>
+        <span class="ob-main"><strong>${esc(o.name)}</strong><span>${o.auto ? `واریز ${dateTitle(o.auto.date)}، خودکار تشخیص داده شد` : `${o.sub}، ${dateTitle(o.due)}`}</span></span>
         <span class="ob-side"><b class="${inc ? 'pos' : ''}">${inc ? '+' : ''}${o.variable && !o.paid ? '<i class="approx">حدود</i> ' : ''}${money(o.amount, false)}</b>
         <em class="${late && !inc ? 'bad' : soon ? 'warn' : ''}">${o.paid ? (inc ? 'دریافت شد' : 'پرداخت شد') : relDay(o.due)}</em></span>
       </button>
@@ -676,7 +676,7 @@
     if (v >= 1e3) return sign + f(v / 1e3, 0) + ' هزار';
     return sign + faNum(v);
   }
-  const pct = (x, d = 0) => x === null || x === undefined || !isFinite(x) ? '—' : faDigits((x * 100).toFixed(d)).replace('.', '٫') + '٪';
+  const pct = (x, d = 0) => x === null || x === undefined || !isFinite(x) ? '—' : `<bdi dir="ltr">${x < 0 ? '−' : ''}${faDigits((Math.abs(x) * 100).toFixed(d)).replace('.', '٫')}٪</bdi>`;
   function niceMax(v) {
     if (v <= 0) return 1;
     const p = Math.pow(10, Math.floor(Math.log10(v)));
@@ -688,7 +688,7 @@
     const ph = H - PT - PB; let g = '';
     for (const f of [0, 0.5, 1]) {
       const y = PT + ph * (1 - f);
-      g += `<line class="grid" x1="${PL}" x2="${W - PR}" y1="${y}" y2="${y}"/><text class="ax" x="${W - 2}" y="${y + 4}" text-anchor="end">${f ? shortMoney(max * f) : '۰'}</text>`;
+      g += `<line class="grid" x1="${PL}" x2="${W - PR}" y1="${y}" y2="${y}"/><text class="ax" x="${W - 2}" y="${y + 4}" text-anchor="start">${f ? shortMoney(max * f) : '۰'}</text>`;
     }
     return g;
   }
@@ -781,7 +781,7 @@
 
     // ۱) تعهدات ۱۲ ماه آینده
     const fc = C.obligationForecast(S, cur, 12);
-    const fcChart = barChart({ labels: fc.map(f => monthName(f.ym).slice(0, 3)), labelEvery: 2,
+    const fcChart = barChart({ labels: fc.map(f => monthName(f.ym)), labelEvery: 2,
       series: [{ cls: 'c1', values: fc.map(f => f.loans) }, { cls: 'c2', values: fc.map(f => f.fixed) }, { cls: 'c3', values: fc.map(f => f.variable) }],
       tips: fc.map(f => `${monthTitle(f.ym)}: جمع ${money(f.total)} (اقساط ${shortMoney(f.loans)}، ثابت ${shortMoney(f.fixed)}، متغیر ${shortMoney(f.variable)})`) });
     const drop = fc.length > 1 ? fc[0].total - Math.min(...fc.slice(1).map(f => f.total)) : 0;
@@ -792,7 +792,7 @@
     const yearsSpan = long ? +full[full.length - 1].ym.slice(0, 4) - +cur.slice(0, 4) : 0;
     const prLabels = pr.map((p, i) => {
       if (i === 0) return 'الان';
-      if (!long) return i % 3 === 0 ? monthName(p.ym).slice(0, 3) : '';
+      if (!long) return i % 3 === 0 ? monthName(p.ym) : '';
       const y = +p.ym.slice(0, 4), py = +pr[i - 1].ym.slice(0, 4);
       return y !== py && (yearsSpan <= 8 || y % 2 === 0) ? faDigits(y) : '';
     });
@@ -803,7 +803,7 @@
     const months = []; for (let i = 0; i < 6; i++) months.push(C.addYm(repMonth, -i));
     const outs = months.map(m => C.monthOutflow(S, m)), incs = months.map(m => C.monthStats(S, m).income);
     const hasInc = incs.some(v => v > 0);
-    const mmChart = barChart({ labels: months.map(m => monthName(m).slice(0, 3)),
+    const mmChart = barChart({ labels: months.map(m => monthName(m)),
       series: [{ cls: 'c1', values: outs.map(o => o.loans) }, { cls: 'c2', values: outs.map(o => o.bills) }, { cls: 'c4', values: outs.map(o => o.daily) }],
       line: hasInc ? { cls: 'c5', values: incs } : null,
       tips: months.map((m, i) => `${monthTitle(m)}: خرج ${money(outs[i].total)}${hasInc ? `، درآمد ${money(incs[i])}` : ''}`) });
@@ -820,7 +820,7 @@
     const top = rows.slice(0, 5), rest = rows.slice(5).reduce((s, r) => s + r[1], 0);
     const segs = top.map(([c, v], i) => ({ cls: 'c' + (i + 1), value: v, name: c })).concat(rest ? [{ cls: 'c6', value: rest, name: 'بقیه' }] : []);
     const sumA = rows.reduce((s, r) => s + r[1], 0);
-    segs.forEach(sg => { sg.tip = `${sg.name}: ${money(sg.value)} (${pct(sg.value / sumA)})`; });
+    segs.forEach(sg => { sg.tip = `${sg.name}: ${money(sg.value)} (${faDigits(Math.round(sg.value / sumA * 100))}٪)`; });
     const catTable = rows.map(([c, v]) => {
       const p = catB[c] || 0, d = p ? (v - p) / p : null;
       return `<li><span>${esc(c)}</span><b>${shortMoney(v)}</b><em class="${d === null ? '' : d > 0 ? 'up-bad' : 'up-good'}">${d === null ? 'جدید' : (d > 0 ? '▲ ' : '▼ ') + pct(Math.abs(d))}</em></li>`;
@@ -1192,8 +1192,20 @@
   }
   // ورقه‌های باز (لیست سررسیدها، جزئیات وام) بعد از هر تغییر همون لحظه تازه می‌شن
   function refreshSheets() { $$('.overlay:not(.closing)').forEach(ov => { if (ov._refresh) ov._refresh(); }); }
+  // درآمدی که با یه واریز بی‌پیوند خودکار جفت شده: تأیید = پیوند واقعی؛ رد = اون واریز دیگه جفت نشه
+  function confirmAutoIncome(o) {
+    const t = S.tx.find(x => x.id === o.auto.txId); if (!t) return;
+    t.link = { kind: 'income', id: o.id, key: String(o.key) }; markPaid('income', o.id, o.key, { date: t.date, txId: t.id });
+    save(); refreshSheets(); render();
+    toast(`واریز ${dateTitle(t.date)} به «${o.name}» وصل شد.`, '', { label: 'برگرداندن', fn: () => { unmarkPaid('income', o.id, o.key); save(); refreshSheets(); render(); } });
+  }
   function askUnpay(kind, id, key) {
     const o = getOb(kind, id, key); if (!o) return;
+    if (o.auto) {
+      if (confirm(`واریز ${money(o.amount)} در ${dateTitle(o.auto.date)} همون «${o.name}» ${monthName(o.key)} حساب شده. درسته؟\nتأیید = وصلش کن · لغو = این واریز ربطی به «${o.name}» نداره`)) { confirmAutoIncome(o); return; }
+      const t = S.tx.find(x => x.id === o.auto.txId); if (t) t.noMatch = true;
+      save(); refreshSheets(); render(); toast('جدا شد؛ این واریز دیگه درآمد ثابت حساب نمی‌شه.'); return;
+    }
     if (!confirm(isInc(kind) ? `دریافت «${o.name}» برگرده به «در انتظار»؟ تراکنش واریزش هم حذف می‌شه.` : `پرداخت «${o.name}» برگرده به پرداخت‌نشده؟ تراکنش برداشتش هم حذف می‌شه.`)) return;
     unmarkPaid(kind, id, key); save(); refreshSheets(); render(); toast('برگردانده شد.');
   }

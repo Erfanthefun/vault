@@ -9,18 +9,18 @@
   const uid = () => Date.now().toString(36) + (uidN++).toString(36) + Math.random().toString(36).slice(2, 6);
 
   // ---------- آیکون‌ها ----------
-  const svg = d => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const svg = d => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
   const IC = {
-    right: svg('<path d="m9 5 7 7-7 7"/>'), left: svg('<path d="m15 5-7 7 7 7"/>'), x: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
+    right: svg('<path d="m9 5 7 7-7 7"/>'), left: svg('<path d="m15 5-7 7 7 7"/>'), x: svg('<path d="M18 6 6 18M6 6l12 12"/>'),
     plus: svg('<path d="M12 5v14M5 12h14"/>'), down: svg('<path d="m6 9 6 6 6-6"/>'),
-    buy: svg('<path d="M12 5v14M6 13l6 6 6-6"/>'), sell: svg('<path d="M12 19V5M6 11l6-6 6 6"/>'),
-    swap: svg('<path d="M7 7h11l-3-3M17 17H6l3 3"/>'), transfer: svg('<path d="M4 12h14M13 6l6 6-6 6"/>'),
+    buy: svg('<path d="M17 7 7 17M16 17H7V8"/>'), sell: svg('<path d="M7 17 17 7M8 7h9v9"/>'),
+    swap: svg('<path d="M8 3 4 7l4 4M4 7h16M16 21l4-4-4-4M20 17H4"/>'), transfer: svg('<path d="M4 12h14M13 6l6 6-6 6"/>'),
     deposit: svg('<rect x="4" y="6" width="16" height="12" rx="2"/><path d="M12 9v6M9.5 12.5 12 15l2.5-2.5"/>'),
     withdraw: svg('<rect x="4" y="6" width="16" height="12" rx="2"/><path d="M12 15V9M9.5 11.5 12 9l2.5 2.5"/>'),
-    open: svg('<path d="M4 7h16v12H4zM4 7l2-3h12l2 3M10 11h4"/>'), clock: svg('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'),
-    gift: svg('<rect x="4" y="9" width="16" height="11" rx="1.5"/><path d="M4 13h16M12 9v11M12 9c-2-4-6-4-6-1.5S10 9 12 9zm0 0c2-4 6-4 6-1.5S14 9 12 9z"/>'),
-    lock: svg('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
-    gear: svg('<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>')
+    open: svg('<path d="M4 7h16v12H4zM4 7l2-3h12l2 3M10 11h4"/>'), clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+    gift: svg('<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/>'),
+    lock: svg('<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
+    gear: svg('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>')
   };
 
   // ---------- اتصال به پوسته‌ی اصلی (app.js) ----------
@@ -221,7 +221,7 @@
     const max = niceMax(Math.max(...all, 0)), min = Math.min(0, ...all);
     const x = i => n === 1 ? PL + pw / 2 : PL + pw - pw * i / (n - 1), y = v => PT + ph * (1 - (v - min) / (max - min || 1));
     let g = '';
-    for (const f of [0, 0.5, 1]) { const v = min + (max - min) * f; g += `<line class="grid" x1="${PL}" x2="${W - PR}" y1="${y(v)}" y2="${y(v)}"/><text class="ax" x="${W - 2}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`; }
+    for (const f of [0, 0.5, 1]) { const v = min + (max - min) * f; g += `<line class="grid" x1="${PL}" x2="${W - PR}" y1="${y(v)}" y2="${y(v)}"/><text class="ax" x="${W - 2}" y="${y(v) + 4}" text-anchor="start">${fmt(v)}</text>`; }
     series.forEach(s => {
       const pts = s.values.map((v, i) => v === null ? null : `${x(i)},${y(v)}`).filter(Boolean);
       if (area && pts.length > 1) g += `<polygon class="area ${s.cls}" points="${x(0)},${y(min)} ${pts.join(' ')} ${x(s.values.length - 1)},${y(min)}"/>`;
@@ -242,7 +242,7 @@
     const pf = V.portfolio(S), P = pf.P, lz = lensName();
     if (!P || !S.ops.length) return `<p class="empty">برای تحلیل، اول قیمت‌ها و موجودی‌ها رو ثبت کن.</p>`;
     const hist = V.history(S);
-    const shortD = d => { const { m, d: dd } = J.jParse(d); return `${faDigits(dd)} ${MONTHS[m - 1].slice(0, 3)}`; };
+    const shortD = d => { const { m, d: dd } = J.jParse(d); return `${faDigits(dd)} ${MONTHS[m - 1]}`; };
     const histChart = hist.length > 1 ? lineChart({ labels: hist.map(h => shortD(h.date)), area: true, fmt: v => shortLens(v, lz),
       series: [{ cls: 's-accent', values: hist.map(h => lensVal(h.total, lz, h.P)) }],
       tips: hist.map(h => { const v = lensVal(h.total, lz, h.P); return `${dateTitle(h.date)}: ${lz === 'toman' ? faNum(v) : dec(v, 2)} ${LENS[lz]}`; }) }) : '';
