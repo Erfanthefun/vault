@@ -60,7 +60,8 @@
   const faUnit = a => ASSETS[a].fa || ASSETS[a].unit;
   const qtyStr = (q, a) => `${V.fmtQty(q, a)} <small>${faUnit(a)}</small>`;
   const qtyTxt = (q, a) => `${V.fmtQty(q, a)} ${faUnit(a)}`;
-  const locName = id => (S.locations.find(l => l.id === id) || {}).name || 'محل حذف‌شده';
+  // محل نگهداری یا حساب بانکی (نسخه‌ی ۱۲: حساب بانکی هم می‌تونه طلا و ارز نگه داره)
+  const locName = id => (S.locations.find(l => l.id === id) || S.accounts.find(a => a.id === id) || {}).name || 'محل حذف‌شده';
   const dateTitle = js => { const { y, m, d } = J.jParse(js); return `${faDigits(d)} ${MONTHS[m - 1]}${y !== J.jParse(today()).y ? ' ' + faDigits(y) : ''}`; };
   const ago = js => { const n = J.diffDays(js, today()); return n <= 0 ? 'امروز' : n === 1 ? 'دیروز' : `${faDigits(n)} روز پیش`; };
   // «، ساعت ۰۶:۲۷ (خودکار)» برای قیمت‌هایی که از کانال اومدن
@@ -183,8 +184,11 @@
     buy: { t: 'خرید', ic: 'buy' }, sell: { t: 'فروش', ic: 'sell' }, swap: { t: 'تبدیل', ic: 'swap' }, transfer: { t: 'انتقال', ic: 'transfer' },
     deposit: { t: 'واریز ریال', ic: 'deposit' }, withdraw: { t: 'برداشت ریال', ic: 'withdraw' }, open: { t: 'موجودی اولیه', ic: 'open' },
     gift_in: { t: 'هدیه گرفتم', ic: 'gift' }, gift_out: { t: 'هدیه دادم', ic: 'gift' },
-    salary: { t: 'دریافت درآمد', ic: 'deposit', hidden: true } // فقط از «ثبت دریافت» درآمد ثابتِ دارایی ساخته می‌شه
+    salary: { t: 'دریافت درآمد', ic: 'deposit', hidden: true }, // فقط از «ثبت دریافت» درآمد ثابتِ دارایی ساخته می‌شه
+    // نسخه‌ی ۱۲: از فرم برداشت/واریز (هر دارایی، هر حساب) ساخته می‌شن
+    send: { t: 'برداشت', ic: 'withdraw', hidden: true }, recv: { t: 'واریز', ic: 'deposit', hidden: true }
   };
+  const WHY_T = { send: { expense: 'خرج', gift: 'هدیه دادم', lend: 'قرض دادم', repay: 'پرداخت بدهی' }, recv: { income: 'درآمد', gift: 'هدیه گرفتم', borrow: 'قرض گرفتم', collect: 'دریافت طلب' } };
   function opTitle(o) {
     const A = x => ASSETS[x.a].name;
     switch (o.type) {
@@ -192,12 +196,15 @@
       case 'transfer': return `انتقال ${A(o.out)}`; case 'open': return `موجودی اولیه‌ی ${A(o.in)}`;
       case 'gift_in': return o.debt ? `دریافت طلب: ${A(o.in)}` : `هدیه: ${A(o.in)}`;
       case 'gift_out': return o.debt ? `پرداخت بدهی: ${A(o.out)}` : `هدیه دادم: ${A(o.out)}`;
-      case 'salary': return `${o.note || 'درآمد'}: ${A(o.in)}`; default: return OPS[o.type].t;
+      case 'salary': return `${o.note || 'درآمد'}: ${A(o.in)}`;
+      case 'send': case 'recv': { const d = o.debt && S.debts.find(x => x.id === o.debt), w = (WHY_T[o.type] || {})[o.why] || OPS[o.type].t;
+        return `${w}${d ? (o.type === 'send' ? ' به ' : ' از ') + d.person : ''}: ${A(o.out || o.in)}`; }
+      default: return OPS[o.type].t;
     }
   }
   function opRow(o) {
-    const where = o.type === 'transfer' ? `${locName(o.loc)} ← ${locName(o.loc2)}` : locName(o.loc);
-    const outTxt = o.out ? qtyTxt(o.out.q, o.out.a) : o.cost != null && !['deposit', 'open', 'gift_in', 'salary'].includes(o.type) ? toman(o.cost) + ' از حساب' : '';
+    const where = o.loc2 ? `${locName(o.loc)} ← ${locName(o.loc2)}` : locName(o.loc);
+    const outTxt = o.out ? qtyTxt(o.out.q, o.out.a) : o.cost != null && !['deposit', 'open', 'gift_in', 'salary', 'recv'].includes(o.type) ? toman(o.cost) + ' از حساب' : '';
     const inTxt = o.in ? qtyTxt(o.in.q, o.in.a) : o.proceeds != null ? toman(o.proceeds) + ' به حساب' : '';
     const bk = bankOf(o), bankTxt = bk ? (bankFlow(o).dir === 'in' ? 'به ' : 'از ') + bk.name : '';
     return `<li><button class="oprow" data-act="editop" data-id="${esc(o.id)}"><span class="opi ${OPS[o.type].ic}">${IC[OPS[o.type].ic]}</span>
@@ -205,7 +212,8 @@
       <span class="flow">${outTxt ? `<span class="o">−${outTxt}</span>` : ''}${inTxt ? `<span class="n">+${inTxt}</span>` : ''}</span></button></li>`;
   }
   function opsHtml() {
-    const list = S.ops.filter(o => opFilter === 'all' || o.type === opFilter || (opFilter === 'cash' && (o.type === 'deposit' || o.type === 'withdraw' || o.type === 'salary')) || (opFilter === 'gift' && o.type.startsWith('gift'))).sort((a, b) => V.opSort(b, a));
+    const list = S.ops.filter(o => opFilter === 'all' || o.type === opFilter || (opFilter === 'cash' && (o.type === 'deposit' || o.type === 'withdraw' || o.type === 'salary' || ((o.type === 'send' || o.type === 'recv') && o.why !== 'gift')))
+      || (opFilter === 'gift' && (o.type.startsWith('gift') || ((o.type === 'send' || o.type === 'recv') && o.why === 'gift')))).sort((a, b) => V.opSort(b, a));
     const groups = {}; list.forEach(o => (groups[o.date] = groups[o.date] || []).push(o));
     return `
     <div class="chips seg" role="group" aria-label="فیلتر">${[['all', 'همه'], ['buy', 'خرید'], ['sell', 'فروش'], ['swap', 'تبدیل'], ['transfer', 'انتقال'], ['gift', 'هدیه'], ['cash', 'واریز/برداشت'], ['open', 'موجودی اولیه']].map(([k, n]) =>
@@ -408,28 +416,13 @@
   // عملیاتی که پول بین یه محل نگهداری و حساب بانکی جابه‌جا می‌کنه: فروش و واریز به حساب، خرید از حساب، برداشت/واریز ریال.
   // با انتخاب حساب بانکی، یه تراکنش «انتقال» به اون عملیات وصل می‌شه (t.op ↔ o.tx) تا موجودی زنده‌ی حساب هم درست بشه.
   // این تراکنش در درآمد و خرج حساب نمی‌شه.
-  function bankFlow(o) {
-    if (o.type === 'sell' && o.proceeds != null && !o.in) return { dir: 'in', amt: o.proceeds };
-    if (o.type === 'buy' && o.cost != null && !o.out) return { dir: 'out', amt: o.cost };
-    if (o.type === 'withdraw' && o.out) return { dir: 'in', amt: o.out.q };
-    if (o.type === 'deposit' && o.in) return { dir: 'out', amt: o.in.q };
-    return null;
-  }
+  const bankFlow = o => Flow.bankFlow(o);
   const bankOf = o => o.bank && bankFlow(o) ? App.bankAccounts().find(a => a.id === o.bank) || null : null;
   function setFlowAmt(o, amt) {
     if (o.type === 'sell') o.proceeds = amt; else if (o.type === 'buy') o.cost = amt;
     else if (o.type === 'withdraw') o.out.q = amt; else if (o.type === 'deposit') { o.in.q = amt; o.cost = amt; }
   }
-  function syncBankTx(o) {
-    const f = bankFlow(o), acc = f && bankOf(o);
-    let t = o.tx && S.tx.find(x => x.id === o.tx);
-    if (!acc) { if (t) S.tx = S.tx.filter(x => x !== t); delete o.tx; if (!f) delete o.bank; return; }
-    if (!t) { t = { id: uid(), created: Date.now(), time: '' }; S.tx.push(t); }
-    const what = o.type === 'sell' ? `فروش ${ASSETS[o.out.a].name}` : o.type === 'buy' ? `خرید ${ASSETS[o.in.a].name}` : o.type === 'withdraw' ? 'برداشت ریال' : 'واریز ریال';
-    Object.assign(t, { type: 'transfer', amount: f.amt, date: t.sms ? t.date : o.date, cat: '', account: f.dir === 'out' ? acc.id : '', to: f.dir === 'in' ? acc.id : '',
-      note: `${what}، ${f.dir === 'in' ? 'از' : 'به'} ${locName(o.loc)}`, op: o.id });
-    o.tx = t.id;
-  }
+  const syncBankTx = o => Flow.syncBankTx(S, o, { uid, now: () => Date.now() });
   function removeOpTx(o) { if (o.tx) S.tx = S.tx.filter(x => x.id !== o.tx); }
   // پیامک بانک که همون واریز/برداشتِ ثبت‌شده از دفتر سرمایه است (تا ۱٪ اختلاف مبلغ، تا ۳ روز فاصله)
   function smsMatch(r, accId) {
@@ -466,6 +459,9 @@
     const E = editId ? S.ops.find(o => o.id === editId) : null;
     if (editId && !E) return;
     if (E && E.type === 'salary') { openSalary({ opId: E.id }); return; }
+    if (E && E.via) { App.openTx({ op: E.id }); return; } // ساخته‌شده با فرم برداشت/واریز/انتقال/تبدیل
+    // نسخه‌ی ۱۲: هدیه‌ی تازه با فرم یکپارچه ثبت می‌شه (هر حساب، و در جریان نقدی ماه)
+    if (!E && (type === 'gift_in' || type === 'gift_out')) { App.openTx({ kind: type === 'gift_in' ? 'in' : 'out', why: 'gift' }); return; }
     preset = preset || {};
     type = E ? E.type : type;
     const firstLoc = (S.locations[0] || {}).id;
@@ -677,7 +673,7 @@
     S.tx = S.tx.filter(x => x !== t); S.ops = S.ops.filter(x => x.id !== o.id);
   }
   // تراکنشی که از دفتر سرمایه ساخته شده، از همون‌جا ویرایش می‌شه
-  function editOp(id) { const o = S.ops.find(x => x.id === id); if (!o) return false; if (o.type === 'salary') openSalary({ opId: id }); else openOpForm(null, id); return true; }
+  function editOp(id) { const o = S.ops.find(x => x.id === id); if (!o) return false; if (o.type === 'salary') openSalary({ opId: id }); else if (o.via) App.openTx({ op: id }); else openOpForm(null, id); return true; }
 
   // ---------- هدف‌ها ----------
   function openGoal(id) {
@@ -788,48 +784,6 @@
     const v = V.valueRial(a, q, P, S.settings); return v === null ? null : Math.round(v);
   }
   const plainQty = (q, a) => { const b = ASSETS[a].base, dec = Math.round(Math.log10(b)); return dec ? (q / b).toFixed(dec).replace(/\.?0+$/, '') : String(q / b); };
-  function debtSettleHtml(d, left) {
-    const a = d.asset, owe = d.dir === 'owe', pref = S.settings.debtSettle || {};
-    const mode = pref.mode === 'none' || (!pref.mode && !S.locations.length) ? 'none' : 'asset';
-    const loc = S.locations.some(l => l.id === pref.loc) ? pref.loc : (S.locations[0] || {}).id;
-    return `<label class="lbl" for="sqty">مقدار ${owe ? 'پرداخت' : 'دریافت'} (${esc(faUnit(a))})</label>
-      <input id="sqty" inputmode="decimal" autocomplete="off" dir="ltr" value="${esc(plainQty(left, a))}">
-      <p class="note">برای تسویه‌ی بخشی از ${esc(ASSETS[a].name)}، عدد رو کمتر کن.</p>
-      <label class="lbl">${esc(ASSETS[a].name)} ${owe ? 'از کجا اومد؟' : 'کجا رفت؟'}</label>
-      <div class="chips seg" id="smode" role="group" aria-label="اثر تسویه روی دارایی‌ها">${[['asset', owe ? 'از دارایی‌ام کم بشه' : 'به دارایی‌ام اضافه بشه'], ['none', 'فقط ثبت']].map(([k, n]) =>
-        `<button type="button" class="chip ${mode === k ? 'on' : ''}" data-m="${k}" aria-pressed="${mode === k}">${n}</button>`).join('')}</div>
-      <div id="slocw" ${mode === 'asset' ? '' : 'hidden'}><label class="lbl" for="sloc">${owe ? 'از کدوم محل؟' : 'کجا نگهش می‌داری؟'}</label><select id="sloc" class="locsel">${locOptions(loc)}</select></div>`;
-  }
-  function debtSettleBind(ov) {
-    const seg = $('#smode', ov); if (!seg) return;
-    bindNewLoc(ov);
-    seg.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b) return;
-      $$('#smode .chip', ov).forEach(c => { c.classList.toggle('on', c === b); c.setAttribute('aria-pressed', c === b); });
-      $('#slocw', ov).hidden = b.dataset.m !== 'asset'; });
-  }
-  // خروجی: { q, op } یا { err }
-  function debtSettleBuild(ov, d, left, date) {
-    const a = d.asset, owe = d.dir === 'owe';
-    let q = V.parseQty($('#sqty', ov).value, a);
-    if (!q) return { err: 'مقدار رو وارد کن.' };
-    q = Math.min(q, left);
-    const on = $('#smode .chip.on', ov), mode = on ? on.dataset.m : 'none', loc = $('#sloc', ov) ? $('#sloc', ov).value : '';
-    S.settings.debtSettle = { mode, loc: loc || (S.settings.debtSettle || {}).loc || '' };
-    if (mode !== 'asset') return { q, op: null };
-    if (!S.locations.some(l => l.id === loc)) return { err: 'محل نگهداری رو انتخاب کن.' };
-    const op = { id: uid(), created: Date.now(), date, type: owe ? 'gift_out' : 'gift_in', loc, debt: d.id, note: `${owe ? 'پرداخت بدهی به' : 'دریافت طلب از'} ${d.person}` };
-    if (owe) {
-      op.out = { a, q };
-      const R = V.replay(S, null, op);
-      if (R.errors.length) return { err: `در «${locName(loc)}» این مقدار ${ASSETS[a].name} نداری. «فقط ثبت» رو بزن یا محل دیگه‌ای انتخاب کن.` };
-    } else {
-      op.in = { a, q };
-      const v = V.valueRial(a, q, V.priceAt(S, date), S.settings);
-      if (!v) return { err: `برای ${ASSETS[a].name} قیمتی ثبت نشده؛ اول قیمت رو ثبت کن یا «فقط ثبت» رو بزن.` };
-      op.cost = Math.round(v); // مثل هدیه: بها = ارزش روز دریافت
-    }
-    return { q, op };
-  }
 
   // ---------- دریافت خودکار قیمت ----------
   // فایل prices.json کنار خود اپ (همون دامنه‌ی github.io) هست؛ پس محدودیت CORS نداره و از ایران هم مثل خود اپ باز می‌شه.
@@ -871,7 +825,9 @@
     lens: b => { S.settings.lens = b.dataset.l; save(); render(); },
     prices: () => openPrices(), locs: openLocs, opchooser: openChooser, goal: b => openGoal(b.dataset.id),
     op: b => openOpForm(b.dataset.type), xbank: openXBank, editop: b => { const o = S.ops.find(x => x.id === b.dataset.id);
+      if (o && o.via) { App.openTx({ op: o.id }); return; }
       if (o && o.debt) { toast('این عملیات از تسویه‌ی بدهی و طلب ساخته شده؛ از همون‌جا (برنامه › بدهی و طلب) حذفش کن.'); return; }
+      if (o && o.type === 'salary') { openSalary({ opId: o.id }); return; }
       openOpForm(null, b.dataset.id); }, opf: b => { opFilter = b.dataset.f; render(); },
     asset: b => openAssetDetail(b.dataset.a), loc: b => openLocDetail(b.dataset.id),
     dellocname: b => locMenu(b.dataset.id), invt: b => { invTab = b.dataset.t; render(); window.scrollTo(0, 0); },
@@ -881,7 +837,7 @@
     savebar: () => { const v = Number(J.normDigits($('#baradj').value).replace('٫', '.').replace(/[^\d.\-]/g, '')) || 0; if (Math.abs(v) > 50) { toast('عدد منطقی نیست.', 'bad'); return; } S.settings.barAdj = v; save(); render(); toast('ذخیره شد.'); }
   };
   window.Inv = { bind: st => { S = st; }, view, homeCard, settingsHtml, excelSheets, looksLikePrices, acts, pullPrices,
-    DEBT_ASSETS, debtAssetName, valueNow, qtyTxt, plainQty, faUnit, debtSettleHtml, debtSettleBind, debtSettleBuild,
+    DEBT_ASSETS, debtAssetName, valueNow, qtyTxt, plainQty, faUnit, opTitle,
     openPrices, openOp: (t, preset) => openOpForm(t, null, preset), afterRender: root => bindInputs(root),
     openXBank, openSalary, editOp, canRemoveOp, removeSalary, smsMatch, applySms, bankFlow,
     locOptions: sel => locOptions(sel), assetOptions: sel => assetOptions(HOLD_ASSETS, sel), bindNewLoc: ov => bindNewLoc(ov), locName: id => locName(id) };

@@ -101,9 +101,16 @@
         flows.push({ date: o.date, r: -o.proceeds });
       } else if (o.out && !o.in && o.out.a === 'irr') { // برداشت ریال یا هدیه‌ی نقدی
         flows.push({ date: o.date, r: -o.out.q });
-      } else if (o.out && !o.in && o.type === 'gift_out') { // هدیه دادم: ارزش روز از دارایی کم می‌شه، سود و زیانی محقق نمی‌شه
+      } else if (o.out && !o.in && (o.type === 'gift_out' || o.type === 'send')) {
+        // دارایی به بیرون رفت (هدیه، خرج، قرض دادن، پرداخت بدهی) با ارزش روزش.
+        // هدیه: سود و زیانی محقق نمی‌شه (خواسته‌ی کاربر). بقیه مثل فروش به ارزش روز: سود/زیان تا اون روز محقق می‌شه.
         const Pd = priceAt(state, o.date), ur = unitRial(o.out.a, Pd, state.settings);
-        flows.push({ date: o.date, r: -(ur ? o.out.q * ur : removed.r) });
+        const val = o.value != null ? o.value : ur ? o.out.q * ur : removed.r;
+        if (o.type === 'send' && o.why !== 'gift') {
+          realized.r += val - removed.r; realized.byAsset[o.out.a] += val - removed.r;
+          if (u) realized.u += val / u - removed.u;
+        }
+        flows.push({ date: o.date, r: -val });
       }
       if (o.in) {
         const { a, q } = o.in, dest = o.loc2 || o.loc;
@@ -139,7 +146,9 @@
         avgUnit: b.q > 0 ? b.r / b.q : null };
     });
     const total = assets.reduce((s, x) => s + (x.value || 0), 0);
-    const byLoc = state.locations.map(l => {
+    // هر حساب می‌تونه هر دارایی‌ای داشته باشه: محل‌های نگهداری + حساب‌های بانکی (طلا، ارز… که در بانک نگه داشته می‌شه)
+    const places = state.locations.concat((state.accounts || []).filter(a => a.kind !== 'credit').map(a => ({ id: a.id, name: a.name, bank: true })));
+    const byLoc = places.map(l => {
       const h = R.H[l.id] || {};
       const v = ORDER.reduce((s, a) => s + (valueRial(a, h[a] || 0, P, S) || 0), 0);
       return { loc: l, h, value: v, pieces: R.pieces[l.id] || {} };

@@ -162,11 +162,14 @@ with sync_playwright() as p:
     # ۱۱) بدهی و طلب
     pg.click('[data-act=obt][data-t=debt]'); pg.click('[data-act=newdebt][data-dir=owe]'); wait()
     pg.fill('#dperson', 'علی'); pg.fill('.sheet [name=damount]', '10000000'); pg.click('#dsave'); sheet_closed()
-    pg.click('.card.debt'); wait(); pg.fill('.sheet [name=samount]', '4000000'); pg.click('#settle'); sheet_closed()
+    # نسخه‌ی ۱۲: «ثبت پرداخت» فرم یکپارچه‌ی برداشت رو با «پرداخت بدهی» و همین مورد باز می‌کنه
+    pg.click('.card.debt'); wait(); pg.click('#settle'); wait(700)
+    check('debt: settle opens tx form preset (repay, this debt, remaining)', pg.get_attribute('#twhy [data-w=repay]', 'aria-pressed') == 'true' and pg.input_value('#tdebt') != '' and pg.input_value('.sheet [name=amount]') == '۱۰٬۰۰۰٬۰۰۰')
+    pg.fill('.sheet [name=amount]', '4000000'); pg.click('#savetx'); sheet_closed()
     D = S()['debts'][0]
     check('debt: partial settle', D['amount'] - sum(x['amount'] for x in D['settles']) == 60000000)
     check('debt: settle tx is transfer', any(t['type'] == 'transfer' and t.get('debt') == D['id'] for t in S()['tx']))
-    pg.click('.card.debt'); wait(); pg.click('#settle'); sheet_closed()
+    pg.click('.card.debt'); wait(); pg.click('#settle'); wait(700); pg.click('#savetx'); sheet_closed()
     check('debt: fully settled & closed', S()['debts'][0].get('closed'))
     pg.click('.fold summary'); pg.click('.card.debt'); wait(); pg.click('[data-undo="1"]'); wait(700)
     check('debt: undo reopens', not S()['debts'][0].get('closed'))

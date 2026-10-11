@@ -454,6 +454,7 @@
   // انتقال: account = «از حساب»، to = «به حساب» (خالی = بیرون از حساب‌های بانکی).
   // انتقال قدیمی (بدون فیلد to): برداشت از account، مگر دریافت طلب که واریز به account بود.
   function txAccountDelta(t, accId, debts) {
+    if (t.asset && t.asset !== 'irr') return 0; // نسخه‌ی ۱۲: ثبتِ دارایی غیرریالی «بدون حساب» روی موجودی ریالی بانک اثری نداره
     const amt = t.amount || 0;
     if (t.type === 'expense') return t.account === accId ? -amt : 0;
     if (t.type === 'income') return t.account === accId ? amt : 0;

@@ -103,7 +103,8 @@ with sync_playwright() as p:
         pg.click('[data-tab=ob]'); wait(100); pg.click('[data-act=obt][data-t=debt]'); wait(200)
         pg.click(f'[data-act=newdebt][data-dir={direction}] >> nth=-1'); wait(400)
         pg.fill('#dperson', person); pg.fill('.sheet [name=damount]', amt); pg.click('#dsave'); closed()
-        pg.click(f'.card.debt:has-text("{person}")'); wait(400); pg.select_option('#sacc', sam); pg.click('#settle'); closed()
+        # نسخه‌ی ۱۲: «ثبت پرداخت/دریافت» فرم یکپارچه رو باز می‌کنه؛ حساب از همون‌جا
+        pg.click(f'.card.debt:has-text("{person}")'); wait(400); pg.click('#settle'); wait(700); pg.select_option('#acc', sam); wait(150); pg.click('#savetx'); closed()
     s0 = bal('سامان')
     debt('owed', 'مریم', '1000000'); check('receivable settled into account → +', bal('سامان') == s0 + 10000000, bal('سامان'))
     debt('owe', 'نیما', '400000'); check('debt paid from account → −', bal('سامان') == s0 + 10000000 - 4000000, bal('سامان'))

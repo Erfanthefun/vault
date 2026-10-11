@@ -672,6 +672,28 @@ main { padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)); }
 .tabbar button[aria-current="page"] svg { color: var(--gold); }
 .gear .ic { width: 20px; height: 20px; }
 .hdr-tools { gap: 10px; }
+
+/* نسخه‌ی ۱۲: برداشت/واریز/انتقال/تبدیل با هر دارایی در هر حساب */
+.chips.asx .chip { padding: 7px 12px; }
+.chips.why4 { display: grid; grid-template-columns: 1fr 1fr; overflow: visible; }
+.chips.why4 .chip { text-align: center; }
+.chip:disabled { opacity: .38; cursor: not-allowed; }
+p.lbl { margin-bottom: 6px; }
+.why-l + .chips { margin-bottom: 2px; }
+.tnote { margin: 4px 2px 0; }
+.hubtile[data-wide] { grid-column: 1 / -1; }
+.hubnote { margin: 8px 2px 0; }
+.txrow .flow { display: grid; justify-items: end; text-align: end; font-size: .84rem; font-weight: 600; white-space: nowrap; font-variant-numeric: proportional-nums; }
+.txrow .flow .o { color: var(--bad); } .txrow .flow .n { color: var(--good); }
+.txrow .flow small { font-weight: 500; color: inherit; opacity: .85; }
+.txrow .flow .dval { color: var(--muted); font-size: .72rem; font-weight: 500; opacity: 1; }
+.txrow b small { font-size: .78em; font-weight: 500; }
+.accs li em.hold { color: var(--ink-2); }
+.accs li.place { padding: 0; }
+.accs li.place .plrow { display: grid; grid-template-columns: 1fr auto; width: 100%; padding: 11px 0; background: none; border: 0; text-align: start; color: inherit; font: inherit; }
+.accs li.place .plrow b { font-variant-numeric: proportional-nums; }
+.accs li.place .plrow b small { font-size: .72rem; color: var(--muted); font-weight: 500; }
+.accs li.place .plrow em { grid-column: 1 / -1; font-style: normal; font-size: .76rem; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -686,6 +708,7 @@ main { padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)); }
 <div id="toast" role="status"></div>
 <script src="core.js"></script>
 <script src="invest.js"></script>
+<script src="flow.js"></script>
 <script src="invest-ui.js"></script>
 <script src="app.js"></script>
 </body>

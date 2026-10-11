@@ -107,21 +107,30 @@ with sync_playwright() as p:
     pg.click('[data-tab=inv]'); wait(); pg.click('.seal button'); wait()
     pg.fill('.sheet [name=p_gold]', '24000000'); pg.fill('.sheet [name=p_usdt]', '235000'); pg.fill('.sheet [name=p_btc]', '84000'); pg.click('.sheet #psave'); closed()
     pg.click('[data-act=locs] >> nth=0'); wait(); pg.click('[data-sug="خانه"]'); wait(100); pg.click('[data-close]'); closed()
-    hub('op', '[data-type=gift_in]')
-    check('gift: form from hub', 'هدیه' in pg.inner_text('.sheet-head h2'))
-    pg.select_option('.sheet [name=asset]', 'gold'); wait(150); pg.fill('.sheet [name=q1]', '2'); pg.fill('#note', 'از مادربزرگ'); pg.click('#save'); closed()
-    g = [o for o in S()['ops'] if o['type'] == 'gift_in'][0]
-    check('gift_in: day value used as basis', g['in']['q'] == 2000 and g['cost'] == 480000000, g)
+    # نسخه‌ی ۱۲: هدیه با فرم یکپارچه‌ی واریز/برداشت (هر حساب، در «آمد/رفت» ماه)
+    home_id = [l['id'] for l in S()['locations'] if l['name'] == 'خانه'][0]
+    hub('addx', '[data-kind=in][data-why=gift]')
+    check('gift: form from hub', 'واریز' in pg.inner_text('.sheet-head h2') and pg.get_attribute('#twhy [data-w=gift]', 'aria-pressed') == 'true')
+    pg.select_option('#acc', home_id); wait(150); pg.click('#tasset [data-a=gold]'); wait(150); pg.fill('.sheet [name=amount]', '2'); pg.fill('#note', 'از مادربزرگ'); wait(150)
+    check('gift: value auto from day price (48M)', fa(pg.input_value('.sheet [name=value]')) == '48000000', pg.input_value('.sheet [name=value]'))
+    pg.click('#savetx'); closed()
+    g = [o for o in S()['ops'] if o['type'] == 'recv'][0]
+    check('gift_in: day value used as basis', g['in']['q'] == 2000 and g['cost'] == 480000000 and g['why'] == 'gift', g)
+    gt = [t for t in S()['tx'] if t.get('op') == g['id']]
+    check('gift_in: counted as «هدیه» income in cash flow', len(gt) == 1 and gt[0]['type'] == 'income' and gt[0]['cat'] == 'هدیه' and gt[0]['amount'] == 480000000, gt)
     pg.click('[data-tab=inv]'); wait(); pg.click('[data-act=invt][data-t=ops]'); wait(); pg.click('.fab'); wait(); pg.click('[data-pick=gift_out]'); wait(500)
-    pg.select_option('.sheet [name=asset]', 'gold'); wait(150); pg.fill('.sheet [name=q1]', '0.5'); pg.click('#save'); closed()
+    check('gift_out: opens unified form (برداشت › هدیه دادم)', pg.get_attribute('#twhy [data-w=gift]', 'aria-pressed') == 'true' and 'برداشت' in pg.inner_text('.sheet-head h2'))
+    pg.select_option('#acc', home_id); wait(150); pg.click('#tasset [data-a=gold]'); wait(150); pg.fill('.sheet [name=amount]', '0.5'); pg.click('#savetx'); closed()
     R = pg.evaluate('(() => { const r = V.replay(window.__vault.state); return { gold: r.totals.gold, realized: r.realized.r, errors: r.errors.length } })()')
     check('gift_out: removes 0.5 g, no realized P&L', R == {'gold': 1500, 'realized': 0, 'errors': 0}, R)
     pg.click('[data-act=opf][data-f=gift]'); wait()
     check('ops filter: هدیه', len(pg.query_selector_all('.oprow')) == 2)
     pg.click('[data-act=opf][data-f=all]'); wait()
     over = pg.query_selector('.oprow'); pg.click('.fab'); wait(); pg.click('[data-pick=gift_out]'); wait(400)
-    pg.select_option('.sheet [name=asset]', 'gold'); wait(150); pg.fill('.sheet [name=q1]', '5'); wait(200)
-    check('gift_out: blocks giving more than you have', 'کافی نیست' in pg.inner_text('#err')); pg.click('[data-close]'); closed()
+    pg.select_option('#acc', home_id); wait(150); pg.click('#tasset [data-a=gold]'); wait(150); pg.fill('.sheet [name=amount]', '5'); wait(200)
+    check('gift_out: blocks giving more than you have', 'کافی نیست' in pg.inner_text('#terr'))
+    pg.click('#savetx'); wait(300); check('gift_out: save refused, data unchanged', len([o for o in S()['ops'] if o['type'] == 'send']) == 1 and 'کافی نیست' in pg.inner_text('#toast'))
+    pg.click('[data-close]'); closed()
 
     # ۵-ب) خرید قسطی: قسط اول روز خرید، بقیه اول ماه‌های بعد
     hub('newloan')
