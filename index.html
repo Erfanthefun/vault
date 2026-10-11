@@ -423,6 +423,7 @@ textarea { min-height: 130px; margin-top: 12px; resize: vertical; }
 .row { display: grid; grid-template-columns: 4px 1fr auto; gap: 12px; align-items: center; width: 100%; padding: 13px 14px 13px 14px; background: none; border: 0; text-align: start;
   transition: transform 160ms var(--ease-out); }
 .row .key { align-self: stretch; border-radius: 4px; }
+.row.withicon { grid-template-columns: 36px 1fr auto; } .row.withicon .main span { white-space: normal; }
 .row .main { display: grid; min-width: 0; }
 .row .main strong { font-weight: 700; }
 .row .main span { font-size: .8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

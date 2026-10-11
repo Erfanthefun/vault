@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۱۰';
+  const VERSION = '۱۱';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -188,7 +188,8 @@
     const info = o.paid[String(key)]; delete o.paid[String(key)];
     if (info && info.txId) {
       const t = S.tx.find(x => x.id === info.txId);
-      if (t) { if (t.auto) S.tx = S.tx.filter(x => x !== t); else delete t.link; }
+      if (t && t.op) S.ops = S.ops.filter(o => o.id !== t.op); // درآمدی که به‌صورت دارایی رسیده بود
+      if (t) { if (t.auto || t.op) S.tx = S.tx.filter(x => x !== t); else delete t.link; }
     }
   }
   function unlinkAllFor(id) { S.tx.forEach(t => { if (t.link && t.link.id === id) delete t.link; }); }
@@ -198,6 +199,9 @@
   };
   const obDefaultCat = (kind, id) => (findOb(kind, id) || {}).cat || (kind === 'loan' ? 'قسط وام' : kind === 'income' ? 'حقوق' : 'پرداخت ماهانه');
   const isInc = kind => kind === 'income';
+  // درآمد ثابتی که به‌صورت دارایی (مثلاً تتر به صرافی) می‌رسه: دریافتش مقدار دارایی رو می‌پرسه
+  const assetIncome = (kind, id) => kind === 'income' && window.Inv && !!(findOb(kind, id) || {}).asset;
+  const incPaidOp = (id, key) => { const f = findOb('income', id), info = f && f.paid && f.paid[String(key)], t = info && info.txId && S.tx.find(x => x.id === info.txId); return t && t.op ? t.op : null; };
   const txTypeFor = kind => kind === 'income' ? 'income' : kind === 'credit' ? 'transfer' : 'expense';
 
   // ---------- بدهی و طلب ----------
@@ -518,7 +522,7 @@
   function txRow(t) {
     const sign = t.type === 'income' ? '+' : t.type === 'expense' ? '−' : '';
     const title = t.cat || (t.debt ? 'بدهی و طلب' : t.type === 'transfer' ? 'انتقال داخلی' : 'بدون دسته');
-    const sub = [t.link ? (t.link.kind === 'income' ? 'درآمد ثابت' : 'قسط/قبض') : '', txAccLabel(t), t.time ? faDigits(t.time) : ''].filter(Boolean).map(esc).join('، ');
+    const sub = [t.link ? (t.link.kind === 'income' ? 'درآمد ثابت' : 'قسط/قبض') : '', t.op && t.type === 'transfer' ? 'صرافی ↔ بانک' : '', txAccLabel(t), t.time ? faDigits(t.time) : ''].filter(Boolean).map(esc).join('، ');
     return `<li><button class="txrow" data-act="edit" data-id="${esc(t.id)}">
       ${t.type === 'transfer' ? catIcon(null, 'swap') : catIcon(t.cat || (t.link ? 'قسط' : ''), t.type === 'income' ? 'plus' : 'dots')}
       <span class="tx-main"><strong>${esc(title)}</strong>${t.note ? `<span>${esc(t.note)}</span>` : ''}${sub ? `<span class="meta">${sub}</span>` : ''}</span>
@@ -584,7 +588,7 @@
         <div class="lc-top"><strong>${catIcon(f.cat || 'حقوق')}${esc(f.name)}</strong><span>روز ${faDigits(f.day)} هر ماه</span></div>
         <div class="fx-row"><b class="pos">+${f.variable ? '<i class="approx">حدود</i> ' : ''}${money(f.amount)}</b>
           <em class="${it && it.paid ? 'ok' : active ? 'warn' : ''}">${!active ? 'غیرفعال' : it.paid ? `${monthName(cur)} دریافت شد` : `در انتظار، ${relDay(it.due)}`}</em></div>
-        ${f.variable ? `<span class="tag">متغیر، پیش‌بینی</span>` : ''}
+        ${f.variable ? `<span class="tag">متغیر، پیش‌بینی</span>` : ''}${f.asset && window.Inv && V.ASSETS[f.asset] ? `<span class="tag">به‌صورت ${esc(V.ASSETS[f.asset].name)}، ${esc(window.Inv.locName(f.loc))}</span>` : ''}
       </button></li>`;
     };
     const total = items.reduce((s, x) => s + x.amount, 0);
@@ -597,19 +601,31 @@
     const f = id ? S.incomes.find(x => x.id === id) : null;
     const cur = ym(today()), it = f && C.incomesForMonth(S, cur).find(x => x.id === f.id);
     const cats = withSel(S.categories.income, f && f.cat);
+    const inv = !!window.Inv, isAsset = !!(f && f.asset && inv);
     const html = `
       ${it ? `<button class="btn wide ${it.paid ? 'ghost' : ''}" id="ipay">${it.paid ? `برگرداندن دریافت ${monthName(cur)}` : `${IC.check}ثبت دریافت ${monthName(cur)}`}</button>` : ''}
       <label class="lbl" for="iname">عنوان</label><input id="iname" value="${esc(f ? f.name : '')}" placeholder="مثلاً حقوق شرکت">
       <label class="check"><input type="checkbox" id="ivar" ${f && f.variable ? 'checked' : ''}> مبلغش هر ماه فرق می‌کنه (پیش‌بینی)</label>
-      <label class="lbl">${f && f.variable ? 'مبلغ پیش‌بینی ماهانه' : 'مبلغ ماهانه'}</label>${amountInput('iamount', f ? f.amount : 0)}
+      <label class="lbl" id="iamtlbl">${f && f.variable ? 'مبلغ پیش‌بینی ماهانه' : 'مبلغ ماهانه'}</label>${amountInput('iamount', f ? f.amount : 0)}
       <label class="lbl" for="iday">روز مورد انتظار در ماه</label><input id="iday" inputmode="numeric" value="${f ? faDigits(f.day) : ''}" placeholder="۱ تا ۳۱">
       <label class="lbl" for="icat">دسته</label><select id="icat">${cats.map(c => `<option ${c === ((f && f.cat) || 'حقوق') ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-      <label class="lbl" for="iacc">به کدوم حساب واریز می‌شه؟</label><select id="iacc">${accOptions(f ? f.account : '')}</select>
+      ${inv ? `<label class="lbl">به چه شکلی می‌رسه؟</label><div class="radio" id="iform"><label><input type="radio" name="iform" value="bank" ${!isAsset ? 'checked' : ''}> ریال، به حساب بانکی</label>
+        <label><input type="radio" name="iform" value="asset" ${isAsset ? 'checked' : ''}> دارایی، مثلاً تتر به صرافی</label></div>` : ''}
+      <div id="iaccwrap" ${isAsset ? 'hidden' : ''}><label class="lbl" for="iacc">به کدوم حساب واریز می‌شه؟</label><select id="iacc">${accOptions(f ? f.account : '')}</select></div>
+      ${inv ? `<div id="iassetwrap" ${isAsset ? '' : 'hidden'}><div class="two"><div><label class="lbl" for="iasset">چی؟</label><select id="iasset">${window.Inv.assetOptions(f && f.asset ? f.asset : 'usdt')}</select></div>
+        <div><label class="lbl" for="iloc">کجا؟</label><select id="iloc" class="locsel">${window.Inv.locOptions(f && f.loc ? f.loc : (S.locations[0] || {}).id)}</select></div></div>
+        <p class="note">«مبلغ ماهانه» معادل تومانیه. هر ماه موقع ثبت دریافت، مقدار واقعی رو می‌پرسه؛ ارزش تومانیش در «آمد» ماه و خودِ دارایی در دارایی‌ها حساب می‌شه.</p></div>` : ''}
       <label class="lbl">از ماه</label>${ymField('istart', f ? f.start : cur)}
       <label class="lbl">تا ماه</label>${ymField('iend', f ? f.end : null, true)}
       <p class="note">اگه پایان مشخصی نداره، «تا ماه» رو خالی بذار.</p>
       <div class="btnrow"><button class="btn wide" id="isave">${f ? 'ذخیره‌ی تغییرات' : 'افزودن درآمد'}</button>${f ? `<button class="btn danger" id="idel">حذف</button>` : ''}</div>`;
     openSheet(f ? f.name : 'درآمد ثابت جدید', html, ov => {
+      if (inv) {
+        window.Inv.bindNewLoc(ov);
+        $('#iform', ov).addEventListener('change', () => { const a = $('[name=iform]:checked', ov).value === 'asset';
+          $('#iaccwrap', ov).hidden = a; $('#iassetwrap', ov).hidden = !a; $('#iamtlbl', ov).textContent = a ? 'مبلغ ماهانه (معادل تومانی)' : 'مبلغ ماهانه'; });
+        if (isAsset) $('#iamtlbl', ov).textContent = 'مبلغ ماهانه (معادل تومانی)';
+      }
       if (it) $('#ipay', ov).addEventListener('click', () => { closeSheet(ov); if (it.paid) askUnpay('income', f.id, cur); else setTimeout(() => openPay('income', f.id, cur), 200); });
       once($('#isave', ov), () => {
         const name = $('#iname', ov).value.trim(), amount = readAmount(ov, 'iamount'), day = readInt($('#iday', ov));
@@ -617,7 +633,10 @@
         if (!name || !amount || !(day >= 1 && day <= 31)) { toast('عنوان، مبلغ و روز مورد انتظار (۱ تا ۳۱) لازمه.', 'bad'); return false; }
         if (end && end < start) { toast('«تا ماه» نمی‌تونه قبل از «از ماه» باشه.', 'bad'); return false; }
         const rec = f || { id: uid(), paid: {} };
-        Object.assign(rec, { name, amount, day, start, end, variable: $('#ivar', ov).checked, cat: $('#icat', ov).value, account: $('#iacc', ov).value });
+        const asAsset = inv && $('[name=iform]:checked', ov).value === 'asset';
+        if (asAsset && (!$('#iloc', ov).value || $('#iloc', ov).value === '__new')) { toast('محل نگهداری (مثلاً والکس) رو انتخاب کن.', 'bad'); return false; }
+        Object.assign(rec, { name, amount, day, start, end, variable: $('#ivar', ov).checked, cat: $('#icat', ov).value, account: asAsset ? '' : $('#iacc', ov).value });
+        if (asAsset) { rec.asset = $('#iasset', ov).value; rec.loc = $('#iloc', ov).value; } else { delete rec.asset; delete rec.loc; }
         if (!f) S.incomes.push(rec);
         save(); closeSheet(ov); obTab = 'income'; if (tab !== 'ob') go('ob'); else render(); toast(f ? 'ذخیره شد.' : 'درآمد ثابت اضافه شد.');
       });
@@ -641,7 +660,7 @@
         ${tile('newloan', IC.cal, 'وام یا خرید قسطی')}${tile('newfixed', IC.cal, 'قبض ماهانه')}${tile('newdebt', IC.swap, 'بدهی یا طلب', 'data-dir="owe"')}${tile('goob', IC.chart, 'دیدن همه‌ی برنامه')}</div>
       ${inv ? `<h3 class="grp">دارایی</h3><div class="hubgrid">
         ${tile('op', IC.in, 'خرید دارایی', 'data-type="buy"')}${tile('op', IC.out, 'فروش دارایی', 'data-type="sell"')}
-        ${tile('op', IC.gift, 'هدیه گرفتم', 'data-type="gift_in"')}${tile('prices', IC.chart, 'به‌روزرسانی قیمت‌ها')}${tile('opchooser', IC.plus, 'عملیات دیگه')}${tile('goinv', IC.salary, 'دیدن دارایی‌ها')}</div>` : ''}`;
+        ${tile('op', IC.gift, 'هدیه گرفتم', 'data-type="gift_in"')}${tile('prices', IC.chart, 'به‌روزرسانی قیمت‌ها')}${tile('xbank', IC.swap, 'صرافی ↔ بانک')}${tile('opchooser', IC.plus, 'عملیات دیگه')}</div>` : ''}`;
     openSheet('ثبت کن', html, ov => {
       // هر انتخاب: اول این ورقه بسته می‌شه، بعد فرم مربوط باز می‌شه
       $('.sheet-body', ov).addEventListener('click', e => { if (e.target.closest('[data-act]')) closeSheet(ov); });
@@ -1029,6 +1048,8 @@
   function openTxForm(opts = {}) {
     const t = opts.id ? S.tx.find(x => x.id === opts.id) : null;
     if (opts.id && !t) return;
+    // تراکنشی که از دفتر سرمایه ساخته شده (حقوق تتری، صرافی ↔ بانک) از همون عملیات ویرایش می‌شه
+    if (t && t.op && window.Inv && window.Inv.editOp(t.op)) return;
     const p = opts.prefill || {};
     const data = t ? { ...t } : { type: opts.type || p.type || 'expense', amount: p.amount || 0, date: p.date || today(), time: p.time || '', note: p.note || '', account: p.accountId || '', cat: '' };
     // انتقال: account = از حساب، to = به حساب. انتقال قدیمی بدون to = برداشت از account (دریافت طلب = واریز به account)
@@ -1123,6 +1144,7 @@
     });
   }
   function deleteTx(t) {
+    if (t.op) S.ops.forEach(o => { if (o.id === t.op && o.tx === t.id) { delete o.tx; delete o.bank; } });
     if (t.link) { const o = findOb(t.link.kind, t.link.id); if (o && o.paid && o.paid[t.link.key] && o.paid[t.link.key].txId === t.id) delete o.paid[t.link.key]; }
     if (t.debt) { const d = S.debts.find(x => x.id === t.debt); if (d) { d.settles = (d.settles || []).filter(x => x.txId !== t.id); if (debtLeft(d) > 0) delete d.closed; } }
     S.tx = S.tx.filter(x => x !== t);
@@ -1155,6 +1177,13 @@
         if (!r) { toast('متنی وارد نشده.', 'bad'); return; }
         if (r.error) toast(r.error + ' مبلغ رو دستی وارد کن.', 'bad');
         const acc = accountFor(r.bank, r.account); save();
+        // همون واریز/برداشتی که از «صرافی ↔ بانک» ثبت شده؟ فقط موجودی حساب به‌روز می‌شه
+        const m = !r.error && window.Inv && window.Inv.smsMatch(r, acc.id);
+        if (m && confirm(`این پیامک همون «${m.note}» (${money(m.amount)}، ${dateTitle(m.date)}) است که از دارایی‌ها ثبت شده.\nتأیید = فقط موجودی ${acc.name} به‌روز بشه (تکراری ثبت نمی‌شه)\nلغو = یه تراکنش جدا ثبت کن`)) {
+          window.Inv.applySms(m, r);
+          if (r.balance != null) { const stamp = m.date + ' ' + (m.time || '00:00'); if (!acc.stamp || stamp >= acc.stamp) setAnchor(acc, r.balance, stamp); }
+          save(); closeSheet(ov); render(); toast(`موجودی ${acc.name} به‌روز شد؛ تراکنش تکراری ثبت نشد.`); return;
+        }
         closeSheet(ov);
         openTxForm({ prefill: { ...r, accountId: acc.id, sms: true } });
       };
@@ -1183,6 +1212,7 @@
   // پرداخت یک‌لمسی برای مبلغ ثابت؛ مورد متغیر مبلغ واقعی رو می‌پرسه
   function quickPay(kind, id, key) {
     const o = getOb(kind, id, key); if (!o || o.paid) return;
+    if (assetIncome(kind, id)) { window.Inv.openSalary({ incomeId: id, key: String(key) }); return; }
     if (o.variable) { openPay(kind, id, key); return; }
     const t = { id: uid(), created: Date.now(), type: txTypeFor(kind), amount: o.estimate, date: today(), time: '', cat: kind === 'credit' ? '' : obDefaultCat(kind, id),
       account: kind === 'credit' ? '' : (findOb(kind, id) || {}).account || '', note: kind === 'credit' ? `تسویه‌ی ${o.name.replace('صورت‌حساب ', '')}، ${monthTitle(key)}` : `${o.name}، ${o.sub}`, link: { kind, id, key: String(key) }, auto: true };
@@ -1206,12 +1236,15 @@
       const t = S.tx.find(x => x.id === o.auto.txId); if (t) t.noMatch = true;
       save(); refreshSheets(); render(); toast('جدا شد؛ این واریز دیگه درآمد ثابت حساب نمی‌شه.'); return;
     }
-    if (!confirm(isInc(kind) ? `دریافت «${o.name}» برگرده به «در انتظار»؟ تراکنش واریزش هم حذف می‌شه.` : `پرداخت «${o.name}» برگرده به پرداخت‌نشده؟ تراکنش برداشتش هم حذف می‌شه.`)) return;
+    const opId = isInc(kind) && incPaidOp(id, key);
+    if (opId && window.Inv && !window.Inv.canRemoveOp(opId)) return;
+    if (!confirm(opId ? `دریافت «${o.name}» برگرده به «در انتظار»؟ دارایی‌ای که بابتش ثبت شده هم از دفتر سرمایه کم می‌شه.` : isInc(kind) ? `دریافت «${o.name}» برگرده به «در انتظار»؟ تراکنش واریزش هم حذف می‌شه.` : `پرداخت «${o.name}» برگرده به پرداخت‌نشده؟ تراکنش برداشتش هم حذف می‌شه.`)) return;
     unmarkPaid(kind, id, key); save(); refreshSheets(); render(); toast('برگردانده شد.');
   }
   function openPay(kind, id, key) {
     const o = getOb(kind, id, key); if (!o) return;
     if (o.paid) { askUnpay(kind, id, key); return; }
+    if (assetIncome(kind, id)) { window.Inv.openSalary({ incomeId: id, key: String(key) }); return; }
     const inc = isInc(kind), ttype = txTypeFor(kind);
     const recent = S.tx.filter(t => t.type === ttype && !t.link && Math.abs(C.diffDays(t.date, today())) <= 45)
       .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 25);
@@ -1576,8 +1609,9 @@
         return [d.dir === 'owe' ? 'بدهکارم به' : 'طلبکارم از', d.person, dAsset(d) === 'irr' ? 'ریال' : window.Inv.debtAssetName(dAsset(d)),
           xq(d, d.amount), xq(d, d.amount - left), xq(d, left), v === null ? '' : v, d.date, d.due || '', d.note || '']; })),
       'بدهی و طلب', [12, 18, 12, 14, 14, 14, 20, 12, 12, 30]);
-    if (S.incomes.length) add([['عنوان', 'نوع', 'مبلغ ماهانه (ریال)', 'روز مورد انتظار', 'دسته', 'از ماه', 'تا ماه']].concat(S.incomes.map(f => [f.name, f.variable ? 'متغیر' : 'ثابت', f.amount, f.day, f.cat || '', f.start || '', f.end || ''])),
-      'درآمدهای ثابت', [22, 8, 18, 14, 14, 10, 10]);
+    if (S.incomes.length) add([['عنوان', 'نوع', 'مبلغ ماهانه (ریال)', 'روز مورد انتظار', 'دسته', 'از ماه', 'تا ماه', 'دریافت به‌صورت']].concat(S.incomes.map(f => [f.name, f.variable ? 'متغیر' : 'ثابت', f.amount, f.day, f.cat || '', f.start || '', f.end || '',
+      f.asset && window.Inv && V.ASSETS[f.asset] ? `${V.ASSETS[f.asset].name}، ${window.Inv.locName(f.loc)}` : 'ریال'])),
+      'درآمدهای ثابت', [22, 8, 18, 14, 14, 10, 10, 20]);
     if (window.Inv) window.Inv.excelSheets(add);
     wb.Workbook = { Views: [{ RTL: true }] };
     const buf = X.write(wb, { bookType: 'xlsx', type: 'array' });

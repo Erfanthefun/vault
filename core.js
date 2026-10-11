@@ -224,7 +224,8 @@
   // شرط: تا ۱۰ روز فاصله از روز مورد انتظار و مبلغ تا ۲۰٪ نزدیک (یا هم‌دسته). هر واریز فقط به یک ماهِ یک درآمد؛
   // نزدیک‌ترین مبلغ و تاریخ اول. کاربر می‌تونه با noMatch یه واریز رو از این کار بیرون بذاره. داده عوض نمی‌شه.
   function incomeMatches(state) {
-    const out = new Map(), used = new Set(), incs = state.incomes || [];
+    // درآمدی که به‌صورت دارایی (مثلاً تتر به صرافی) می‌رسه با واریز بانکی جفت نمی‌شه
+    const out = new Map(), used = new Set(), incs = (state.incomes || []).filter(f => !f.asset);
     if (!incs.length) return out;
     const refd = new Set();
     const mark = paid => Object.values(paid || {}).forEach(i => { if (i && i.txId) refd.add(i.txId); });
@@ -257,7 +258,7 @@
       const info = f.paid && f.paid[ymStr];
       const auto = !info && matches.get(f.id + '|' + ymStr);
       const got = info ? (info.txId && txMap.has(info.txId) ? txMap.get(info.txId) : f.amount) : auto ? auto.amount : f.amount;
-      out.push({ kind: 'income', id: f.id, key: ymStr, name: f.name, sub: f.variable ? 'درآمد متغیر، پیش‌بینی' : 'درآمد ثابت',
+      out.push({ kind: 'income', id: f.id, key: ymStr, name: f.name, sub: f.variable ? 'درآمد متغیر، پیش‌بینی' : 'درآمد ثابت', asset: f.asset || null,
         estimate: f.amount, amount: got, due: jStr(y, m, Math.min(f.day, monthLen(y, m))), paid: !!info || !!auto, variable: !!f.variable,
         auto: auto ? { txId: auto.id, date: auto.date } : null });
     }

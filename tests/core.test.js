@@ -238,5 +238,13 @@ t('income: unlinked deposit = fixed income, counted once (v10 regression)', () =
   // و) دو واریز، یک حقوق → فقط نزدیک‌ترین
   s = base(); s.tx.push({ id: 'a', type: 'income', amount: 4000, date: '1405/07/06' }, { id: 'b', type: 'income', amount: 4000, date: '1405/07/01' });
   assert.strictEqual(C.incomesForMonth(s, '1405/07')[0].auto.txId, 'b'); assert.strictEqual(C.cashFlow(s, '1405/07', T).in, 8000);
+  // ز) نسخه‌ی ۱۱: درآمدی که به‌صورت دارایی (تتر) می‌رسه با واریز بانکی جفت نمی‌شه؛ دریافتش (تراکنش بدون حساب) یک بار حساب می‌شه
+  s = base(); s.incomes[0].asset = 'usdt'; s.incomes[0].loc = 'L1'; s.tx.push({ id: 't', type: 'income', amount: 4000, date: '1405/07/02', account: 'B1' });
+  assert.strictEqual(C.incomesForMonth(s, '1405/07')[0].auto, null); assert.strictEqual(C.cashFlow(s, '1405/07', T).in, 8000);
+  s = base(); s.incomes[0].asset = 'usdt'; s.tx.push({ id: 's', type: 'income', amount: 4100, date: '1405/07/02', account: '', op: 'o1', link: { kind: 'income', id: s.incomes[0].id, key: '1405/07' } });
+  s.incomes[0].paid['1405/07'] = { date: '1405/07/02', txId: 's' }; assert.strictEqual(C.cashFlow(s, '1405/07', T).in, 4100);
+  // انتقال صرافی → بانک: موجودی حساب بالا می‌ره، در آمد و رفت نیست
+  s = base(); s.tx.push({ id: 'x', type: 'transfer', amount: 500, date: '1405/07/03', account: '', to: 'B1', op: 'o2' });
+  assert.strictEqual(C.txAccountDelta(s.tx[0], 'B1', []), 500); assert.strictEqual(C.cashFlow(s, '1405/07', T).in, 4000); assert.strictEqual(C.cashFlow(s, '1405/07', T).out, 0);
 });
 console.log(`core: ${n} test groups passed`);

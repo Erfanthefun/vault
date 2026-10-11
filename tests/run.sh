@@ -14,5 +14,6 @@ python3 tests/e2e_auto.py; P=$?
 python3 tests/e2e_debt.py; D=$?
 python3 tests/e2e_bal.py; L=$?
 python3 tests/e2e_inc.py; I=$?
+python3 tests/e2e_xbank.py; K=$?
 python3 tests/audit.py; X=$?
-kill $SRV; exit $(( A || B || U || P || D || L || I || X ))
+kill $SRV; exit $(( A || B || U || P || D || L || I || K || X ))

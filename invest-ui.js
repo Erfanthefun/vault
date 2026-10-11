@@ -182,7 +182,8 @@
   const OPS = {
     buy: { t: 'خرید', ic: 'buy' }, sell: { t: 'فروش', ic: 'sell' }, swap: { t: 'تبدیل', ic: 'swap' }, transfer: { t: 'انتقال', ic: 'transfer' },
     deposit: { t: 'واریز ریال', ic: 'deposit' }, withdraw: { t: 'برداشت ریال', ic: 'withdraw' }, open: { t: 'موجودی اولیه', ic: 'open' },
-    gift_in: { t: 'هدیه گرفتم', ic: 'gift' }, gift_out: { t: 'هدیه دادم', ic: 'gift' }
+    gift_in: { t: 'هدیه گرفتم', ic: 'gift' }, gift_out: { t: 'هدیه دادم', ic: 'gift' },
+    salary: { t: 'دریافت درآمد', ic: 'deposit', hidden: true } // فقط از «ثبت دریافت» درآمد ثابتِ دارایی ساخته می‌شه
   };
   function opTitle(o) {
     const A = x => ASSETS[x.a].name;
@@ -190,19 +191,21 @@
       case 'buy': return `خرید ${A(o.in)}`; case 'sell': return `فروش ${A(o.out)}`; case 'swap': return `${A(o.out)} به ${A(o.in)}`;
       case 'transfer': return `انتقال ${A(o.out)}`; case 'open': return `موجودی اولیه‌ی ${A(o.in)}`;
       case 'gift_in': return o.debt ? `دریافت طلب: ${A(o.in)}` : `هدیه: ${A(o.in)}`;
-      case 'gift_out': return o.debt ? `پرداخت بدهی: ${A(o.out)}` : `هدیه دادم: ${A(o.out)}`; default: return OPS[o.type].t;
+      case 'gift_out': return o.debt ? `پرداخت بدهی: ${A(o.out)}` : `هدیه دادم: ${A(o.out)}`;
+      case 'salary': return `${o.note || 'درآمد'}: ${A(o.in)}`; default: return OPS[o.type].t;
     }
   }
   function opRow(o) {
     const where = o.type === 'transfer' ? `${locName(o.loc)} ← ${locName(o.loc2)}` : locName(o.loc);
-    const outTxt = o.out ? qtyTxt(o.out.q, o.out.a) : o.cost != null && !['deposit', 'open', 'gift_in'].includes(o.type) ? toman(o.cost) + ' از حساب' : '';
+    const outTxt = o.out ? qtyTxt(o.out.q, o.out.a) : o.cost != null && !['deposit', 'open', 'gift_in', 'salary'].includes(o.type) ? toman(o.cost) + ' از حساب' : '';
     const inTxt = o.in ? qtyTxt(o.in.q, o.in.a) : o.proceeds != null ? toman(o.proceeds) + ' به حساب' : '';
+    const bk = bankOf(o), bankTxt = bk ? (bankFlow(o).dir === 'in' ? 'به ' : 'از ') + bk.name : '';
     return `<li><button class="oprow" data-act="editop" data-id="${esc(o.id)}"><span class="opi ${OPS[o.type].ic}">${IC[OPS[o.type].ic]}</span>
-      <span class="main"><strong>${opTitle(o)}</strong><span>${esc(where)}${o.note ? '، ' + esc(o.note) : ''}</span></span>
+      <span class="main"><strong>${opTitle(o)}</strong><span>${esc(where)}${bankTxt ? '، ' + esc(bankTxt) : ''}${o.note && o.type !== 'salary' ? '، ' + esc(o.note) : ''}</span></span>
       <span class="flow">${outTxt ? `<span class="o">−${outTxt}</span>` : ''}${inTxt ? `<span class="n">+${inTxt}</span>` : ''}</span></button></li>`;
   }
   function opsHtml() {
-    const list = S.ops.filter(o => opFilter === 'all' || o.type === opFilter || (opFilter === 'cash' && (o.type === 'deposit' || o.type === 'withdraw')) || (opFilter === 'gift' && o.type.startsWith('gift'))).sort((a, b) => V.opSort(b, a));
+    const list = S.ops.filter(o => opFilter === 'all' || o.type === opFilter || (opFilter === 'cash' && (o.type === 'deposit' || o.type === 'withdraw' || o.type === 'salary')) || (opFilter === 'gift' && o.type.startsWith('gift'))).sort((a, b) => V.opSort(b, a));
     const groups = {}; list.forEach(o => (groups[o.date] = groups[o.date] || []).push(o));
     return `
     <div class="chips seg" role="group" aria-label="فیلتر">${[['all', 'همه'], ['buy', 'خرید'], ['sell', 'فروش'], ['swap', 'تبدیل'], ['transfer', 'انتقال'], ['gift', 'هدیه'], ['cash', 'واریز/برداشت'], ['open', 'موجودی اولیه']].map(([k, n]) =>
@@ -385,7 +388,7 @@
 
   // ---------- فرم عملیات ----------
   function openChooser() {
-    openSheet('عملیات جدید', `<nav class="qa4 grid2">${Object.entries(OPS).map(([k, o]) => `<button data-pick="${k}"><span class="qi">${IC[o.ic]}</span>${o.t}</button>`).join('')}</nav>`, ov => {
+    openSheet('عملیات جدید', `<nav class="qa4 grid2">${Object.entries(OPS).filter(([, o]) => !o.hidden).map(([k, o]) => `<button data-pick="${k}"><span class="qi">${IC[o.ic]}</span>${o.t}</button>`).join('')}</nav>`, ov => {
       $('.qa4', ov).addEventListener('click', e => { const b = e.target.closest('[data-pick]'); if (!b) return; closeSheet(ov); setTimeout(() => openOpForm(b.dataset.pick), 150); });
     });
   }
@@ -401,32 +404,95 @@
     return c ? { pieces: { [w]: c }, q: Math.round(parseFloat(w) * 1000 * c) } : null;
   };
 
-  function openOpForm(type, editId) {
+  // ---------- صرافی ↔ بانک ----------
+  // عملیاتی که پول بین یه محل نگهداری و حساب بانکی جابه‌جا می‌کنه: فروش و واریز به حساب، خرید از حساب، برداشت/واریز ریال.
+  // با انتخاب حساب بانکی، یه تراکنش «انتقال» به اون عملیات وصل می‌شه (t.op ↔ o.tx) تا موجودی زنده‌ی حساب هم درست بشه.
+  // این تراکنش در درآمد و خرج حساب نمی‌شه.
+  function bankFlow(o) {
+    if (o.type === 'sell' && o.proceeds != null && !o.in) return { dir: 'in', amt: o.proceeds };
+    if (o.type === 'buy' && o.cost != null && !o.out) return { dir: 'out', amt: o.cost };
+    if (o.type === 'withdraw' && o.out) return { dir: 'in', amt: o.out.q };
+    if (o.type === 'deposit' && o.in) return { dir: 'out', amt: o.in.q };
+    return null;
+  }
+  const bankOf = o => o.bank && bankFlow(o) ? App.bankAccounts().find(a => a.id === o.bank) || null : null;
+  function setFlowAmt(o, amt) {
+    if (o.type === 'sell') o.proceeds = amt; else if (o.type === 'buy') o.cost = amt;
+    else if (o.type === 'withdraw') o.out.q = amt; else if (o.type === 'deposit') { o.in.q = amt; o.cost = amt; }
+  }
+  function syncBankTx(o) {
+    const f = bankFlow(o), acc = f && bankOf(o);
+    let t = o.tx && S.tx.find(x => x.id === o.tx);
+    if (!acc) { if (t) S.tx = S.tx.filter(x => x !== t); delete o.tx; if (!f) delete o.bank; return; }
+    if (!t) { t = { id: uid(), created: Date.now(), time: '' }; S.tx.push(t); }
+    const what = o.type === 'sell' ? `فروش ${ASSETS[o.out.a].name}` : o.type === 'buy' ? `خرید ${ASSETS[o.in.a].name}` : o.type === 'withdraw' ? 'برداشت ریال' : 'واریز ریال';
+    Object.assign(t, { type: 'transfer', amount: f.amt, date: t.sms ? t.date : o.date, cat: '', account: f.dir === 'out' ? acc.id : '', to: f.dir === 'in' ? acc.id : '',
+      note: `${what}، ${f.dir === 'in' ? 'از' : 'به'} ${locName(o.loc)}`, op: o.id });
+    o.tx = t.id;
+  }
+  function removeOpTx(o) { if (o.tx) S.tx = S.tx.filter(x => x.id !== o.tx); }
+  // پیامک بانک که همون واریز/برداشتِ ثبت‌شده از دفتر سرمایه است (تا ۱٪ اختلاف مبلغ، تا ۳ روز فاصله)
+  function smsMatch(r, accId) {
+    if (!r || !r.amount || !accId) return null;
+    const near = t => Math.abs(t.amount - r.amount) <= Math.max(10, t.amount * 0.01) && Math.abs(J.diffDays(t.date, r.date)) <= 3;
+    return S.tx.filter(t => t.op && !t.sms && t.type === 'transfer' && (r.type === 'income' ? t.to === accId : t.account === accId) && near(t))
+      .sort((a, b) => Math.abs(a.amount - r.amount) - Math.abs(b.amount - r.amount) || Math.abs(J.diffDays(a.date, r.date)) - Math.abs(J.diffDays(b.date, r.date)))[0] || null;
+  }
+  // مبلغ و زمان پیامک جای عدد دستی می‌شینه (در عملیات هم)، مگه اینکه موجودی دارایی منفی بشه
+  function applySms(t, r) {
+    t.sms = true; t.date = r.date; if (r.time) t.time = r.time;
+    const o = S.ops.find(x => x.id === t.op);
+    if (!o || t.amount === r.amount) return;
+    const keep = JSON.stringify(o); setFlowAmt(o, r.amount);
+    if (V.replay(S).errors.length) Object.assign(o, JSON.parse(keep)); else t.amount = r.amount;
+  }
+  const bankOptions = sel => `<option value="">به حساب بانکی وصل نکن (فقط دفتر سرمایه)</option>` +
+    App.bankAccounts().map(a => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
+  const defaultBank = () => { const ids = App.bankAccounts().map(a => a.id); return ids.includes(S.settings.lastBank) ? S.settings.lastBank : ids[0] || ''; };
+
+  // انتخاب سریع: چهار حالت جابه‌جایی پول بین صرافی و بانک
+  function openXBank() {
+    const items = [['sell', 'sell', 'فروش دارایی و واریز به بانک', 'مثلاً فروش تتر در والکس و واریز به بلو', { dst: 'ext', asset: 'usdt' }],
+      ['withdraw', 'withdraw', 'برداشت ریال از صرافی به بانک', 'ریالی که قبلاً در صرافی مونده', {}],
+      ['buy', 'buy', 'خرید دارایی با پول حساب بانکی', 'پول مستقیم از حساب کم می‌شه', { src: 'ext', asset: 'usdt' }],
+      ['deposit', 'deposit', 'واریز ریال از بانک به صرافی', 'برای خرید بعدی', {}]];
+    openSheet('صرافی ↔ بانک', `<p class="note">موجودی دارایی و موجودی حساب بانکی با هم به‌روز می‌شن. این جابه‌جایی‌ها در درآمد و خرج ماه حساب نمی‌شن. اگه بعداً پیامک همین واریز رو بچسبونی، دوباره ثبت نمی‌شه.</p>
+      <ul class="ledger">${items.map(([k, ic, t, sub], i) => `<li><button class="row withicon" data-xb="${i}"><span class="opi ${ic}">${IC[ic]}</span><span class="main"><strong>${t}</strong><span>${sub}</span></span><span class="side">${IC.left}</span></button></li>`).join('')}</ul>`, ov => {
+      $('.ledger', ov).addEventListener('click', e => { const b = e.target.closest('[data-xb]'); if (!b) return; const it = items[+b.dataset.xb]; closeSheet(ov); setTimeout(() => openOpForm(it[0], null, it[4]), 150); });
+    });
+  }
+
+  function openOpForm(type, editId, preset) {
     const E = editId ? S.ops.find(o => o.id === editId) : null;
     if (editId && !E) return;
+    if (E && E.type === 'salary') { openSalary({ opId: E.id }); return; }
+    preset = preset || {};
     type = E ? E.type : type;
     const firstLoc = (S.locations[0] || {}).id;
     const loc = E ? E.loc : firstLoc;
-    let asset = E ? ((['sell', 'swap', 'transfer', 'gift_out'].includes(E.type)) ? E.out.a : E.in ? E.in.a : 'irr') : (type === 'swap' ? 'usdt' : 'gold');
+    let asset = E ? ((['sell', 'swap', 'transfer', 'gift_out'].includes(E.type)) ? E.out.a : E.in ? E.in.a : 'irr') : (preset.asset || (type === 'swap' ? 'usdt' : 'gold'));
     const assetList = ['open', 'gift_in', 'gift_out'].includes(type) ? HOLD_ASSETS.concat(['irr']) : HOLD_ASSETS;
     const title = (E ? 'ویرایش ' : '') + OPS[type].t;
     if (!S.locations.length) { toast('اول یه محل نگهداری تعریف کن.', 'bad'); openLocs(); return; }
-    const payExt = E ? (E.type === 'buy' && !E.out) : false, recvExt = E ? (E.type === 'sell' && !E.in) : false;
+    const payExt = E ? (E.type === 'buy' && !E.out) : preset.src === 'ext', recvExt = E ? (E.type === 'sell' && !E.in) : preset.dst === 'ext';
+    const bankSel = E ? (E.bank || '') : defaultBank();
+    const bankField = label => App.bankAccounts().length || bankSel ? `<div id="bankwrap"><label class="lbl" for="f-bank">${label}</label><select id="f-bank" name="bank">${bankOptions(bankSel)}</select>
+      <p class="hint">موجودی این حساب در «پول روزانه» هم کم و زیاد می‌شه؛ در درآمد و خرج حساب نمی‌شه.</p></div>` : '';
     let fields = '';
     const locSel = (name, sel, label) => `<label class="lbl" for="f-${name}">${label}</label><select id="f-${name}" name="${name}" class="locsel">${locOptions(sel)}</select>`;
     const assetSel = (name, list, sel, label) => `<label class="lbl" for="f-${name}">${label}</label><select id="f-${name}" name="${name}">${assetOptions(list, sel)}</select>`;
     if (type === 'buy') fields = locSel('loc', loc, 'کجا خریدی؟') + assetSel('asset', HOLD_ASSETS, asset, 'چی خریدی؟') +
       `<div id="qwrap"></div><label class="lbl">مبلغ کل پرداختی (با کارمزد)</label>${tomanInput('amt', E ? (E.out ? E.out.q : E.cost) : 0)}
-      <label class="lbl">پول از کجا اومد؟</label><div class="radio"><label><input type="radio" name="src" value="loc" ${!payExt ? 'checked' : ''}> از ریالِ موجود در همین محل</label><label><input type="radio" name="src" value="ext" ${payExt ? 'checked' : ''}> از حساب بانکی (مستقیم)</label></div>`;
+      <label class="lbl">پول از کجا اومد؟</label><div class="radio"><label><input type="radio" name="src" value="loc" ${!payExt ? 'checked' : ''}> از ریالِ موجود در همین محل</label><label><input type="radio" name="src" value="ext" ${payExt ? 'checked' : ''}> از حساب بانکی (مستقیم)</label></div>${bankField('از کدوم حساب؟')}`;
     else if (type === 'sell') fields = locSel('loc', loc, 'کجا فروختی؟') + assetSel('asset', HOLD_ASSETS, asset, 'چی فروختی؟') +
       `<div id="qwrap"></div><label class="lbl">مبلغ دریافتی (بعد از کارمزد)</label>${tomanInput('amt', E ? (E.in ? E.in.q : E.proceeds) : 0)}
-      <label class="lbl">پولش کجا رفت؟</label><div class="radio"><label><input type="radio" name="dst" value="loc" ${!recvExt ? 'checked' : ''}> ریال همین‌جا می‌مونه</label><label><input type="radio" name="dst" value="ext" ${recvExt ? 'checked' : ''}> به حساب بانکی برداشت شد</label></div>`;
+      <label class="lbl">پولش کجا رفت؟</label><div class="radio"><label><input type="radio" name="dst" value="loc" ${!recvExt ? 'checked' : ''}> ریال همین‌جا می‌مونه</label><label><input type="radio" name="dst" value="ext" ${recvExt ? 'checked' : ''}> به حساب بانکی برداشت شد</label></div>${bankField('به کدوم حساب؟')}`;
     else if (type === 'swap') fields = locSel('loc', loc, 'کجا؟') + `<div class="two"><div>${assetSel('asset', HOLD_ASSETS, asset, 'دادی')}</div><div>${assetSel('asset2', HOLD_ASSETS, E ? E.in.a : 'btc', 'گرفتی')}</div></div>
       <div id="qwrap"></div><label class="lbl">مقدار دریافتی</label><div id="q2wrap"></div>`;
     else if (type === 'transfer') fields = assetSel('asset', HOLD_ASSETS, asset, 'چی؟') + `<div class="two"><div>${locSel('loc', loc, 'از')}</div><div>${locSel('loc2', E ? E.loc2 : (S.locations[1] || S.locations[0]).id, 'به')}</div></div>
       <div id="qwrap"></div><label class="lbl">مقدار رسیده به مقصد</label><div id="q2wrap"></div><p class="hint">تفاوتش کارمزد انتقاله. اگه خالی بذاری، همون مقدار ارسالی حساب می‌شه.</p>`;
     else if (type === 'deposit' || type === 'withdraw') fields = locSel('loc', loc, type === 'deposit' ? 'به کجا واریز کردی؟' : 'از کجا برداشت کردی؟') +
-      `<label class="lbl">مبلغ</label>${tomanInput('amt', E ? (E.in || E.out).q : 0)}`;
+      `<label class="lbl">مبلغ</label>${tomanInput('amt', E ? (E.in || E.out).q : 0)}${bankField(type === 'deposit' ? 'از کدوم حساب بانکی؟' : 'به کدوم حساب بانکی؟')}`;
     else if (type === 'gift_in') fields = locSel('loc', loc, 'کجا نگهش می‌داری؟') + assetSel('asset', assetList, asset, 'چی هدیه گرفتی؟') +
       `<div id="qwrap"></div><div id="costwrap"><label class="lbl">ارزش روز دریافت</label>${tomanInput('cost', E && E.in.a !== 'irr' ? E.cost : 0)}
       <p class="hint">خالی بذاری، با قیمت ثبت‌شده‌ی همون روز حساب می‌شه. سود و زیان از همین ارزش به بعد سنجیده می‌شه.</p></div>`;
@@ -503,6 +569,8 @@
           o.in = side; o.cost = a === 'irr' ? qa : readToman(ov, 'cost');
           if (a !== 'irr' && !o.cost && !silent) return { err: 'بهای خرید لازمه (می‌تونی «ارزش امروز» رو بزنی).', op: o };
         }
+        if (bankFlow(o) && val('bank')) o.bank = val('bank');
+        if (E && E.tx) o.tx = E.tx;
         return { op: o };
       }
       function check(o) {
@@ -513,6 +581,8 @@
       function update() {
         const b = build(true), sum = $('#sum', ov), err = $('#err', ov);
         err.hidden = true;
+        const bw = $('#bankwrap', ov);
+        if (bw) bw.hidden = (type === 'buy' && $('[name=src]:checked', ov).value !== 'ext') || (type === 'sell' && $('[name=dst]:checked', ov).value !== 'ext');
         if (!b.op || b.err) { sum.hidden = true; return; }
         const o = b.op, P = V.latestPrice(S);
         let s = '';
@@ -532,17 +602,82 @@
         const e = check(b.op);
         if (e) { toast(`موجودی ${ASSETS[e.asset].name} در «${locName(e.loc)}» کافی نیست.`, 'bad'); return false; }
         if (E) S.ops = S.ops.map(x => x.id === E.id ? b.op : x); else S.ops.push(b.op);
-        save(); closeAll(); render(); toast(E ? 'ذخیره شد.' : `${OPS[type].t} ثبت شد.`);
+        syncBankTx(b.op); const bk = bankOf(b.op); if (bk) S.settings.lastBank = bk.id;
+        save(); closeAll(); render(); toast((E ? 'ذخیره شد.' : `${OPS[type].t} ثبت شد.`) + (bk ? ` موجودی ${bk.name} هم به‌روز شد.` : ''));
       });
       if (E) $('#del', ov).addEventListener('click', () => {
         const rest = { ...S, ops: S.ops.filter(x => x.id !== E.id) };
         const R = V.replay(rest);
         if (R.errors.length) { toast('با حذف این عملیات، موجودی بعضی عملیات‌های بعدی منفی می‌شه. اول اون‌ها رو اصلاح کن.', 'bad'); return; }
         if (!confirm('این عملیات حذف بشه؟')) return;
-        S.ops = rest.ops; save(); closeAll(); render(); toast('حذف شد.');
+        removeOpTx(E); S.ops = rest.ops; save(); closeAll(); render(); toast('حذف شد.');
       });
     });
   }
+
+  // ---------- درآمد ثابت به‌صورت دارایی (مثلاً حقوق تتری به صرافی) ----------
+  // مبلغ درآمد تومانیِ ثابته، مقدار دارایی با قیمت روز فرق می‌کنه. دریافت = یک عملیات «salary» در دفتر سرمایه
+  // (ورود دارایی با بهای تمام‌شده = ارزش تومانی) + یک تراکنش واریز بدون حساب بانکی که در «آمد» ماه حساب می‌شه.
+  const ymTitle = k => { const [y, m] = k.split('/').map(Number); return `${MONTHS[m - 1]} ${faDigits(y)}`; };
+  function opsWithout(id, extra) { return V.replay({ ...S, ops: S.ops.filter(x => x.id !== id) }, null, extra).errors; }
+  function openSalary(arg) {
+    const E = arg.opId ? S.ops.find(o => o.id === arg.opId) : null;
+    const incId = E ? (E.income || {}).id : arg.incomeId, key = E ? (E.income || {}).key : arg.key;
+    const f = S.incomes.find(x => x.id === incId);
+    if (!f && !E) return;
+    if (!S.locations.length) { toast('اول یه محل نگهداری (مثلاً والکس) تعریف کن.', 'bad'); openLocs(); return; }
+    const asset = E ? E.in.a : (f.asset && ASSETS[f.asset] ? f.asset : 'usdt');
+    const loc = E ? E.loc : (S.locations.some(l => l.id === f.loc) ? f.loc : S.locations[0].id);
+    const expected = E ? E.cost : f.amount, name = f ? f.name : (E.note || 'درآمد');
+    const guessQty = date => { const u = V.unitRial(asset, V.priceAt(S, date), S.settings); return u ? Math.round(expected / u) : 0; };
+    const html = `<p class="payhead"><strong>${esc(name)}</strong><span>${key ? ymTitle(key) : ''}${f ? `، معادل ${toman(f.amount)}` : ''}</span></p>
+      <label class="lbl" for="f-sloc">به کجا رسید؟</label><select id="f-sloc" name="sloc" class="locsel">${locOptions(loc)}</select>
+      <label class="lbl">مقدار ${esc(ASSETS[asset].name)} دریافتی</label>${qtyInput('sq', asset, E ? E.in.q : guessQty(today()))}
+      <p class="hint">${E ? '' : 'با قیمت ثبت‌شده‌ی امروز حدس زده شده؛ عدد واقعی رو از صرافی بنویس.'}</p>
+      <label class="lbl">ارزش تومانی</label>${tomanInput('sval', expected)}
+      <p class="hint">همین عدد در «آمد» این ماه حساب می‌شه و بهای خرید این ${esc(faUnit(asset))} هم همینه.</p>
+      <label class="lbl">تاریخ دریافت</label>${dateField('sdate', E ? E.date : today())}
+      <div class="summary" id="ssum" hidden></div>
+      <div class="btnrow"><button class="btn wide" id="ssave">${E ? 'ذخیره‌ی تغییرات' : 'ثبت دریافت'}</button>${E ? `<button class="btn danger" id="sdel">برگرداندن دریافت</button>` : ''}</div>`;
+    openSheet(E ? 'ویرایش دریافت درآمد' : 'ثبت دریافت درآمد', html, ov => {
+      bindNewLoc(ov);
+      const upd = () => { const q = readQty(ov, 'sq', asset), v = readToman(ov, 'sval'), el = $('#ssum', ov);
+        el.hidden = !(q && v); if (q && v) el.innerHTML = `نرخ هر ${faUnit(asset)}: <b>${toman(v / q * ASSETS[asset].base)}</b>`; };
+      ov.addEventListener('input', upd); upd();
+      once($('#ssave', ov), () => {
+        const q = readQty(ov, 'sq', asset), v = readToman(ov, 'sval'), date = readDate(ov, 'sdate'), l = $('[name=sloc]', ov).value;
+        if (!l || l === '__new') { toast('محل رو انتخاب کن.', 'bad'); return false; }
+        if (!q || !v) { toast('مقدار و ارزش تومانی لازمه.', 'bad'); return false; }
+        const op = { ...(E || { id: uid(), created: Date.now(), type: 'salary' }), date, loc: l, in: { a: asset, q }, cost: v, note: name };
+        if (incId) op.income = { id: incId, key: String(key) };
+        if (opsWithout(op.id, op).length) { toast('با این تغییر موجودی بعضی عملیات‌های بعدی منفی می‌شه.', 'bad'); return false; }
+        if (E) S.ops = S.ops.map(x => x.id === E.id ? op : x); else S.ops.push(op);
+        let t = op.tx && S.tx.find(x => x.id === op.tx);
+        if (!t) { t = { id: uid(), created: Date.now(), time: '', auto: true }; S.tx.push(t); }
+        Object.assign(t, { type: 'income', amount: v, date, cat: (f && f.cat) || 'حقوق', account: '', note: `${name}، ${qtyTxt(q, asset)} به ${locName(l)}`, op: op.id });
+        if (f && key) { t.link = { kind: 'income', id: f.id, key: String(key) }; f.paid = f.paid || {}; f.paid[String(key)] = { date, txId: t.id }; f.loc = l; }
+        op.tx = t.id;
+        save(); closeAll(); render(); toast(`${E ? 'ذخیره شد' : 'دریافت ثبت شد'}: ${qtyTxt(q, asset)} در ${locName(l)}.`);
+      });
+      if (E) $('#sdel', ov).addEventListener('click', () => {
+        if (!canRemoveOp(E.id)) return;
+        if (!confirm(`دریافت «${name}» برگرده به «در انتظار»؟ ${qtyTxt(E.in.q, asset)} از ${locName(E.loc)} کم می‌شه.`)) return;
+        removeSalary(E); save(); closeAll(); render(); toast('برگردانده شد.');
+      });
+    });
+  }
+  function canRemoveOp(id) {
+    if (!opsWithout(id).length) return true;
+    toast('با حذف این دریافت، موجودی بعضی عملیات‌های بعدی (مثلاً فروش همین تتر) منفی می‌شه. اول اون‌ها رو اصلاح کن.', 'bad'); return false;
+  }
+  // حذف عملیات دریافت + تراکنش واریز + علامت دریافت درآمد
+  function removeSalary(o) {
+    const t = o.tx && S.tx.find(x => x.id === o.tx);
+    if (t && t.link) { const f = S.incomes.find(x => x.id === t.link.id); if (f && f.paid && f.paid[t.link.key] && f.paid[t.link.key].txId === t.id) delete f.paid[t.link.key]; }
+    S.tx = S.tx.filter(x => x !== t); S.ops = S.ops.filter(x => x.id !== o.id);
+  }
+  // تراکنشی که از دفتر سرمایه ساخته شده، از همون‌جا ویرایش می‌شه
+  function editOp(id) { const o = S.ops.find(x => x.id === id); if (!o) return false; if (o.type === 'salary') openSalary({ opId: id }); else openOpForm(null, id); return true; }
 
   // ---------- هدف‌ها ----------
   function openGoal(id) {
@@ -735,7 +870,7 @@
   const acts = {
     lens: b => { S.settings.lens = b.dataset.l; save(); render(); },
     prices: () => openPrices(), locs: openLocs, opchooser: openChooser, goal: b => openGoal(b.dataset.id),
-    op: b => openOpForm(b.dataset.type), editop: b => { const o = S.ops.find(x => x.id === b.dataset.id);
+    op: b => openOpForm(b.dataset.type), xbank: openXBank, editop: b => { const o = S.ops.find(x => x.id === b.dataset.id);
       if (o && o.debt) { toast('این عملیات از تسویه‌ی بدهی و طلب ساخته شده؛ از همون‌جا (برنامه › بدهی و طلب) حذفش کن.'); return; }
       openOpForm(null, b.dataset.id); }, opf: b => { opFilter = b.dataset.f; render(); },
     asset: b => openAssetDetail(b.dataset.a), loc: b => openLocDetail(b.dataset.id),
@@ -747,5 +882,7 @@
   };
   window.Inv = { bind: st => { S = st; }, view, homeCard, settingsHtml, excelSheets, looksLikePrices, acts, pullPrices,
     DEBT_ASSETS, debtAssetName, valueNow, qtyTxt, plainQty, faUnit, debtSettleHtml, debtSettleBind, debtSettleBuild,
-    openPrices, openOp: t => openOpForm(t), afterRender: root => bindInputs(root) };
+    openPrices, openOp: (t, preset) => openOpForm(t, null, preset), afterRender: root => bindInputs(root),
+    openXBank, openSalary, editOp, canRemoveOp, removeSalary, smsMatch, applySms, bankFlow,
+    locOptions: sel => locOptions(sel), assetOptions: sel => assetOptions(HOLD_ASSETS, sel), bindNewLoc: ov => bindNewLoc(ov), locName: id => locName(id) };
 })();
