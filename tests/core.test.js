@@ -247,4 +247,44 @@ t('income: unlinked deposit = fixed income, counted once (v10 regression)', () =
   s = base(); s.tx.push({ id: 'x', type: 'transfer', amount: 500, date: '1405/07/03', account: '', to: 'B1', op: 'o2' });
   assert.strictEqual(C.txAccountDelta(s.tx[0], 'B1', []), 500); assert.strictEqual(C.cashFlow(s, '1405/07', T).in, 4000); assert.strictEqual(C.cashFlow(s, '1405/07', T).out, 0);
 });
+t('credit line v11.2: open purchases, statements, early settle, migration', () => {
+  const A = { id: 'S', kind: 'credit', name: 'اسنپ‌پی', limit: 100000000, settles: [] };
+  const buy = (id, amount, date, created) => ({ id, type: 'expense', amount, date, account: 'S', created: created || 1 });
+  // مثال کاربر: ۶ م خرید → مانده ۴ م، صورت‌حساب ۶ م؛ ۲ م دیگه → مانده ۲ م، صورت‌حساب ۸ م
+  let s = { accounts: [A], tx: [buy('a', 60000000, '1405/07/05')] };
+  assert.strictEqual(C.creditUsed(s, A), 60000000);
+  assert.deepStrictEqual(C.creditStatements(s, A, '1405/07').map(x => [x.open, x.amount, x.due]), [[true, 60000000, '1405/07/30']]);
+  s.tx.push(buy('b', 20000000, '1405/07/09'));
+  assert.strictEqual(C.creditUsed(s, A), 80000000); assert.strictEqual(C.creditStatements(s, A, '1405/07')[0].amount, 80000000);
+  // تسویه‌ی زودهنگام روز ۱۰: هر دو بسته؛ اعتبار کامل؛ خرید روز ۱۲ صورت‌حساب تازه‌ی همون ماه
+  const set = C.creditSettleSet(s, A, '1405/07', '1405/07/10'); assert.strictEqual(set.amount, 80000000);
+  set.list.forEach(x => { x.cs = 's1'; }); A.settles.push({ id: 's1', ym: '1405/07', date: '1405/07/10', amount: 80000000, txId: 'p1', bank: 'B' });
+  s.tx.push({ id: 'p1', type: 'transfer', amount: 80000000, date: '1405/07/10', account: 'B', to: '', link: { kind: 'credit', id: 'S', key: 's1' } });
+  assert.strictEqual(C.creditUsed(s, A), 0);
+  s.tx.push(buy('c', 5000000, '1405/07/12'));
+  const st = C.creditStatements(s, A, '1405/07');
+  assert.deepStrictEqual(st.map(x => [x.open, x.amount]), [[true, 5000000], [false, 80000000]]);
+  assert.strictEqual(C.creditUsed(s, A), 5000000);
+  // پرداخت تسویه از بانک: موجودی حساب B کم می‌شه؛ در خرج ماه نیست (انتقال)
+  assert.strictEqual(C.txAccountDelta(s.tx.find(x => x.id === 'p1'), 'B', []), -80000000);
+  // تسویه فقط خریدهای تا تاریخ تسویه رو می‌بنده
+  assert.strictEqual(C.creditSettleSet(s, A, '1405/07', '1405/07/11').list.length, 0);
+  // ماه‌های باز
+  s.tx.push(buy('d', 1000, '1405/06/30')); assert.deepStrictEqual(C.creditOpenMonths(s, A), ['1405/06', '1405/07']);
+
+  // مهاجرت از تیک ماهانه‌ی قدیمی: خرید قبل از تیک بسته، خرید بعد از تیک (باگ قبلی) باز می‌مونه
+  const L = { id: 'S', kind: 'credit', name: 'اسنپ‌پی', limit: 100000000, paid: { '1405/07': { date: '1405/07/10', txId: 'q' } } };
+  const s2 = { accounts: [L], tx: [buy('x', 9260000, '1405/07/03', 100), { id: 'q', type: 'transfer', amount: 9260000, date: '1405/07/10', account: '', created: 200, link: { kind: 'credit', id: 'S', key: '1405/07' } },
+    buy('y', 5001000, '1405/07/19', 300), buy('z', 7000, '1405/06/02', 50)] };
+  C.migrateCredit(s2);
+  assert.deepStrictEqual(Object.keys(L.paid), []);
+  assert.strictEqual(L.settles.length, 1); assert.strictEqual(L.settles[0].ym, '1405/07'); assert.strictEqual(L.settles[0].txId, 'q');
+  assert.strictEqual(s2.tx.find(x => x.id === 'x').cs, L.settles[0].id); assert.strictEqual(s2.tx.find(x => x.id === 'y').cs, undefined);
+  assert.deepStrictEqual(s2.tx.find(x => x.id === 'q').link, { kind: 'credit', id: 'S', key: L.settles[0].id });
+  assert.strictEqual(C.creditUsed(s2, L), 5001000 + 7000);
+  const snap = JSON.stringify(s2); C.migrateCredit(s2); assert.strictEqual(JSON.stringify(s2), snap); // idempotent
+  // خرید اعتباری که حسابش عوض شده علامت تسویه نداره؛ تسویه‌ی ناموجود → خرید باز
+  s2.tx.find(x => x.id === 'x').account = 'B'; s2.tx.push(buy('w', 10, '1405/07/01')); s2.tx[s2.tx.length - 1].cs = 'nope';
+  C.migrateCredit(s2); assert.strictEqual(s2.tx.find(x => x.id === 'x').cs, undefined); assert.strictEqual(s2.tx.find(x => x.id === 'w').cs, undefined);
+});
 console.log(`core: ${n} test groups passed`);

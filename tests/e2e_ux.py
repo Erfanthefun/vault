@@ -174,7 +174,9 @@ with sync_playwright() as p:
     check('credit: statement in «پیش رو», due end of month', row is not None and '۳٬۰۰۰٬۰۰۰' in row.inner_text(), row.inner_text() if row else None)
     check('credit: remaining limit shown', '۷٬۰۰۰٬۰۰۰' in pg.inner_text('.accs li.credit'))
     var0 = pg.evaluate("Core.monthStats(window.__vault.state, Core.ym(Core.today())).variable")
-    pg.click('.ob:has-text("صورت‌حساب اسنپ‌پی اعتباری") .tick'); wait(600)
+    pg.click('.ob:has-text("صورت‌حساب اسنپ‌پی اعتباری") .tick'); wait(500)
+    check('credit: tick opens settle sheet (asks account)', pg.query_selector('.sheet #cacc') is not None)
+    pg.select_option('#cacc', ''); pg.click('#dosettle'); closed()
     st = S(); rp = [t for t in st['tx'] if t.get('link', {}).get('kind') == 'credit']
     check('credit: settling = transfer (not a second expense)', len(rp) == 1 and rp[0]['type'] == 'transfer' and rp[0]['amount'] == 30000000)
     check('credit: spending counted once', pg.evaluate("Core.monthStats(window.__vault.state, Core.ym(Core.today())).variable") == var0)
@@ -192,7 +194,7 @@ with sync_playwright() as p:
     net = pg.evaluate("""(() => { const s = window.__vault.state, pf = V.portfolio(s).total;
       const bank = s.accounts.filter(a => a.kind !== 'credit').reduce((x, a) => x + (a.balance > 0 ? a.balance : 0), 0);
       const loans = s.loans.reduce((x, l) => x + Core.loanSummary(l).remainingAmount, 0);
-      const credit = s.tx.filter(t => t.type === 'expense' && s.accounts.some(a => a.kind === 'credit' && a.id === t.account && !(a.paid || {})[Core.ym(t.date)])).reduce((x, t) => x + t.amount, 0);
+      const credit = s.tx.filter(t => t.type === 'expense' && s.accounts.some(a => a.kind === 'credit' && a.id === t.account && !t.cs)).reduce((x, t) => x + t.amount, 0);
       let owe = 0, owed = 0; s.debts.forEach(d => { const l = d.amount - d.settles.reduce((a, b) => a + b.amount, 0); if (l > 0) d.dir === 'owe' ? owe += l : owed += l; });
       return pf + bank - loans - owe - credit + owed; })()""")
     shown = float(fa(pg.inner_text('.nwc-rows .net dd')).replace('−', '-').replace('تومان', '').strip())

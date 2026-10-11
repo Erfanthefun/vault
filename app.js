@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۱۱';
+  const VERSION = '۱۱٫۲';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -46,7 +46,7 @@
     if ((s.settings.seedV || 0) >= 4) return;
     const has = (arr, n) => arr.some(x => (x.name || x) === n);
     for (const n of SEED.banks) if (!has(s.accounts, n)) s.accounts.push({ id: uid(), kind: 'bank', bank: n, num: '', name: n, balance: null, stamp: '' });
-    for (const [n, lim] of SEED.credits) if (!has(s.accounts, n)) s.accounts.push({ id: uid(), kind: 'credit', name: n, limit: lim, paid: {} });
+    for (const [n, lim] of SEED.credits) if (!has(s.accounts, n)) s.accounts.push({ id: uid(), kind: 'credit', name: n, limit: lim, paid: {}, settles: [] });
     for (const n of SEED.invest) if (!has(s.locations, n)) s.locations.push({ id: uid(), name: n });
     s.lists = s.lists || {};
     s.lists.bnpl = [...new Set([...(s.lists.bnpl || []), ...SEED.bnpl])];
@@ -88,6 +88,7 @@
     s.lastCat = s.lastCat || {};
     s.lists = s.lists && typeof s.lists === 'object' ? s.lists : {};
     s.accounts.forEach(a => { if (!a.kind) a.kind = 'bank'; if (a.kind === 'credit') a.paid = a.paid || {}; });
+    C.migrateCredit(s); // نسخه‌ی ۱۱٫۲: تیک ماهانه‌ی قدیمی → تسویه با فهرست خریدها
     seedLists(s);
     return s;
   }
@@ -175,15 +176,17 @@
   const findOb = (kind, id) => (kind === 'loan' ? S.loans : kind === 'income' ? S.incomes : kind === 'credit' ? S.accounts : S.fixed).find(x => x.id === id);
   function getOb(kind, id, key) {
     const rec = findOb(kind, id); if (!rec) return null;
-    const month = kind === 'loan' ? ym(C.loanDue(rec, +key)) : key;
+    const month = kind === 'loan' ? ym(C.loanDue(rec, +key)) : kind === 'credit' ? creditKeyYm(rec, key) : key;
     const list = kind === 'income' ? C.incomesForMonth(S, month) : kind === 'credit' ? creditItemsForMonth(month) : C.obligationsForMonth(S, month);
     return list.find(o => o.kind === kind && o.id === id && o.key === String(key)) || null;
   }
   function markPaid(kind, id, key, info) {
+    if (kind === 'credit') return; // اعتبار خرید فقط از ورقه‌ی تسویه (settleCredit) علامت می‌خوره
     const o = findOb(kind, id); if (!o) return;
     o.paid = o.paid || {}; o.paid[String(key)] = info;
   }
   function unmarkPaid(kind, id, key) {
+    if (kind === 'credit') { unsettleCredit(id, key); return; }
     const o = findOb(kind, id); if (!o || !o.paid) return;
     const info = o.paid[String(key)]; delete o.paid[String(key)];
     if (info && info.txId) {
@@ -245,24 +248,69 @@
   const nowStamp = () => { const d = new Date(); return today() + ' ' + C.pad(d.getHours()) + ':' + C.pad(d.getMinutes()); };
   const setAnchor = (a, balance, stamp) => { a.balance = balance; a.stamp = balance === null ? '' : stamp; a.at = Date.now(); };
   const bankTotal = () => bankAccounts().reduce((s, a) => { const b = curBal(a); return s + (b > 0 ? b : 0); }, 0);
-  // صورت‌حساب اعتبار خرید: جمع خریدهای اعتباری هر ماه، سررسید روز آخر همون ماه
-  function creditItemsForMonth(ymStr, txMap) {
-    txMap = txMap || C.txAmountMap(S);
-    const [y, m] = ymStr.split('/').map(Number), last = C.jStr(y, m, C.monthLen(y, m)), out = [];
-    for (const a of creditAccounts()) {
-      const spent = S.tx.filter(t => t.type === 'expense' && t.account === a.id && ym(t.date) === ymStr).reduce((s, t) => s + t.amount, 0);
-      const info = a.paid && a.paid[ymStr];
-      if (!spent && !info) continue;
-      const paidAmt = info && info.txId && txMap.has(info.txId) ? txMap.get(info.txId) : spent;
-      out.push({ kind: 'credit', id: a.id, key: ymStr, name: `صورت‌حساب ${a.name}`, sub: 'اعتبار خرید، تسویه آخر ماه',
-        estimate: spent, amount: info ? paidAmt : spent, due: last, paid: !!info, variable: false });
+  // ---------- اعتبار خرید (نسخه‌ی ۱۱٫۲) ----------
+  // صورت‌حساب = خریدهای تسویه‌نشده‌ی هر ماه (سررسید آخر همون ماه). تسویه از یه حساب بانکی (هر بار پرسیده می‌شه)
+  // همون مبلغ رو از حساب کم می‌کنه و اعتبار رو آزاد می‌کنه. خریدهای بعد از تسویه صورت‌حساب تازه می‌سازن. منطق: Core.credit*
+  const creditUsed = a => C.creditUsed(S, a);
+  const creditLeft = a => Math.max(0, (a.limit || 0) - creditUsed(a));
+  const creditKeyYm = (a, key) => { const s = (a.settles || []).find(x => x.id === String(key)); return s ? s.ym : String(key); };
+  function creditItemsForMonth(ymStr) {
+    const out = [];
+    for (const a of creditAccounts()) for (const st of C.creditStatements(S, a, ymStr)) {
+      const bank = st.settle && S.accounts.find(x => x.id === st.settle.bank);
+      out.push({ kind: 'credit', id: a.id, key: st.key, name: `صورت‌حساب ${a.name}`, estimate: st.amount, amount: st.amount, due: st.due, paid: !st.open, variable: false,
+        sub: st.open ? (a.limit ? `مانده‌ی اعتبار ${money(creditLeft(a))}` : 'اعتبار خرید') : (bank ? `تسویه از ${bank.name}` : 'تسویه شد') });
     }
     return out;
   }
-  // اعتبار مصرف‌شده: صورت‌حساب‌های تسویه‌نشده‌ی همه‌ی ماه‌ها
-  function creditUsed(a) {
-    const months = [...new Set(S.tx.filter(t => t.type === 'expense' && t.account === a.id).map(t => ym(t.date)))];
-    return months.filter(m => !(a.paid && a.paid[m])).reduce((s, m) => s + S.tx.filter(t => t.type === 'expense' && t.account === a.id && ym(t.date) === m).reduce((x, t) => x + t.amount, 0), 0);
+  // صورت‌حساب‌های باز همه‌ی ماه‌ها تا ماه جاری (قدیمی‌ها = عقب‌افتاده) + تسویه‌های ماه جاری
+  function creditHomeItems(cur) {
+    const months = new Set([cur]); creditAccounts().forEach(a => C.creditOpenMonths(S, a).forEach(m => { if (m <= cur) months.add(m); }));
+    return [...months].sort().flatMap(m => creditItemsForMonth(m).filter(c => !c.paid || m === cur));
+  }
+  // ورقه‌ی تسویه: مبلغ = خریدهای بازِ این صورت‌حساب تا تاریخ تسویه؛ حساب پرداخت هر بار پرسیده می‌شه
+  function openCreditPay(id, key) {
+    const a = findOb('credit', id), o = a && getOb('credit', id, key); if (!o) return;
+    if (o.paid) { askUnpay('credit', id, key); return; }
+    const banks = bankAccounts(), last = S.settings.creditPayAcc;
+    const def = banks.some(b => b.id === last) ? last : (banks.find(b => /بلو/.test(b.name)) || banks[0] || {}).id || '';
+    const html = `
+      <p class="payhead"><strong>${esc(o.name)}</strong><span>${monthTitle(o.key)}، سررسید ${dateFull(o.due)}</span></p>
+      <div class="summary" id="csum"></div>
+      <label class="lbl">تاریخ تسویه</label>${dateField('date', today(), true)}
+      <label class="lbl" for="cacc">از کدوم حساب پرداخت کردی؟</label><select id="cacc">${banks.map(b => `<option value="${esc(b.id)}" ${b.id === def ? 'selected' : ''}>${esc(b.name)}${curBal(b) !== null ? `، موجودی ${money(curBal(b))}` : ''}</option>`).join('')}
+        <option value="" ${def ? '' : 'selected'}>از هیچ حسابی کم نشه (قبلاً جای دیگه ثبت شده)</option></select>
+      <p class="note">همین مبلغ از حساب انتخاب‌شده کم می‌شه و اعتبار ${esc(a.name)} آزاد می‌شه. در خرج ماه دوباره حساب نمی‌شه (خریدها همون روز خرج حساب شدن).</p>
+      <button class="btn wide" id="dosettle">${IC.check}ثبت تسویه</button>`;
+    openSheet('تسویه‌ی صورت‌حساب', html, ov => {
+      const upd = () => { const set = C.creditSettleSet(S, a, o.key, readDate(ov, 'date'));
+        $('#csum', ov).innerHTML = `مبلغ تسویه: <b>${money(set.amount)}</b> (${faDigits(set.list.length)} خرید)${set.amount !== o.amount ? `<br>خریدهای بعد از این تاریخ (${money(o.amount - set.amount)}) در صورت‌حساب بعدی می‌مونن.` : ''}`; };
+      ov.addEventListener('change', upd); ov.addEventListener('click', e => { if (e.target.closest('[data-setdate]')) setTimeout(upd, 0); }); upd();
+      once($('#dosettle', ov), () => {
+        const date = readDate(ov, 'date'), set = C.creditSettleSet(S, a, o.key, date), bank = $('#cacc', ov).value;
+        if (!set.list.length) { toast('تا این تاریخ خریدی برای تسویه نیست.', 'bad'); return false; }
+        settleCredit(a, o.key, date, bank, set);
+        save(); closeSheet(ov); refreshSheets(); render();
+        const b = S.accounts.find(x => x.id === bank);
+        toast(`${money(set.amount)} تسویه شد${b ? ` و از ${b.name} کم شد` : ''}.`);
+      });
+    });
+  }
+  function settleCredit(a, ymStr, date, bank, set) {
+    const sid = 's' + uid();
+    const t = { id: uid(), created: Date.now(), type: 'transfer', amount: set.amount, date, time: '', cat: '', account: bank || '', to: '',
+      note: `تسویه‌ی ${a.name}، ${monthTitle(ymStr)}`, link: { kind: 'credit', id: a.id, key: sid }, auto: true };
+    S.tx.push(t); set.list.forEach(x => { x.cs = sid; });
+    a.settles = a.settles || []; a.settles.push({ id: sid, ym: ymStr, date, amount: set.amount, txId: t.id, bank: bank || '' });
+    if (bank) S.settings.creditPayAcc = bank;
+  }
+  // برگرداندن تسویه: خریدها دوباره باز، تراکنش پرداخت حذف (پول به حساب برمی‌گرده)
+  function unsettleCredit(id, key) {
+    const a = findOb('credit', id); if (!a) return;
+    const st = (a.settles || []).find(x => x.id === String(key)); if (!st) return;
+    S.tx.forEach(t => { if (t.cs === st.id) delete t.cs; });
+    S.tx = S.tx.filter(t => !(t.id === st.txId || (t.link && t.link.kind === 'credit' && t.link.key === st.id)));
+    a.settles = a.settles.filter(x => x !== st);
   }
   const creditUsedTotal = () => creditAccounts().reduce((s, a) => s + creditUsed(a), 0);
   const accName = id => (S.accounts.find(a => a.id === id) || {}).name || '';
@@ -273,7 +321,7 @@
     if (!('to' in t)) { const d = t.debt && S.debts.find(x => x.id === t.debt); if (d && d.dir === 'owed') { to = from; from = ''; } }
     return from && to ? `از ${from} به ${to}` : from ? `از ${from}` : to ? `به ${to}` : '';
   };
-  const accOpt = (a, sel) => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}</option>`;
+  const accOpt = (a, sel) => `<option value="${esc(a.id)}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}${a.kind === 'credit' && a.limit ? `، مانده ${money(creditLeft(a))}` : ''}</option>`;
   const accOptions = (sel, withCredit) => `<option value="">بدون حساب</option><optgroup label="حساب بانکی">${bankAccounts().map(a => accOpt(a, sel)).join('')}</optgroup>`
     + (withCredit && creditAccounts().length ? `<optgroup label="اعتبار خرید (تسویه آخر ماه)">${creditAccounts().map(a => accOpt(a, sel)).join('')}</optgroup>` : '')
     + `<option value="__newbank">+ حساب بانکی جدید…</option>`;
@@ -411,7 +459,7 @@
     const cf = C.cashFlow(S, cur, t), prevYm = C.addYm(cur, -1), prevCf = C.cashFlow(S, prevYm, t);
     const barMax = Math.max(cf.in, cf.out, 1), barW = v => v ? Math.max(2, Math.round(v / barMax * 100)) : 0;
     const pctTxt = r => `<bdi dir="ltr">${r < 0 ? '−' : ''}${faDigits(Math.round(Math.abs(r) * 100))}٪</bdi>`;
-    const cred = creditItemsForMonth(C.addYm(cur, -1)).filter(c => !c.paid).concat(creditItemsForMonth(cur));
+    const cred = creditHomeItems(cur);
     const unpaidList = overdue.concat(st.obs.filter(o => !o.paid), st.inc.filter(i => !i.paid), cred.filter(c => !c.paid)).sort(byDue);
     const paidList = st.obs.filter(o => o.paid).concat(st.inc.filter(i => i.paid), cred.filter(c => c.paid)).sort(byDue);
     const recent = S.tx.slice().sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')) || (b.created || 0) - (a.created || 0)).slice(0, 4);
@@ -910,10 +958,11 @@
       <div class="addcat"><input id="newbank" placeholder="بانک جدید" aria-label="بانک جدید"><button class="btn small" data-act="addbank">افزودن</button></div>
       <button class="btn small" data-act="saveacc">ذخیره‌ی نام‌ها و موجودی‌ها</button></section>
     <section class="block card-block"><h2>اعتبار خرید (تسویه آخر ماه)</h2>
-      <p class="note">خریدی که با این اعتبارها ثبت کنی خرج همون روزه؛ آخر ماه صورت‌حسابش در «پیش رو» میاد و تسویه‌ش به‌صورت انتقال ثبت می‌شه تا دوبار خرج حساب نشه.</p>
-      <ul class="listed">${creditAccounts().map(a => `<li><input data-accname="${esc(a.id)}" value="${esc(a.name)}" aria-label="نام اعتبار">
-        <div class="unitwrap sm"><input class="amt" data-acclim="${esc(a.id)}" inputmode="numeric" value="${a.limit ? faNum(disp(a.limit)) : ''}" placeholder="سقف" aria-label="سقف ${esc(a.name)}"><span>سقف</span></div>
-        <button class="iconbtn sm" data-act="delacc" data-id="${esc(a.id)}" aria-label="حذف ${esc(a.name)}">${IC.x}</button></li>`).join('')}</ul>
+      <p class="note">عدد هر کادر <b>سقف کل</b> اعتباره و با خرید عوض نمی‌شه؛ مانده رو خود اپ حساب می‌کنه (زیر هر کادر و در کارت «حساب‌ها»). خرید با این اعتبارها خرج همون روزه؛ آخر ماه صورت‌حسابش در «پیش رو» میاد و با تسویه‌ش اعتبار دوباره آزاد می‌شه.</p>
+      <ul class="listed">${creditAccounts().map(a => { const u = creditUsed(a); return `<li><input data-accname="${esc(a.id)}" value="${esc(a.name)}" aria-label="نام اعتبار">
+        <div class="unitwrap sm"><input class="amt" data-acclim="${esc(a.id)}" inputmode="numeric" value="${a.limit ? faNum(disp(a.limit)) : ''}" placeholder="سقف" aria-label="سقف ${esc(a.name)}"><span>سقف کل</span></div>
+        <p class="credline">${a.limit ? `مانده: <b>${money(Math.max(0, a.limit - u))}</b>، استفاده‌شده ${money(u)}` : `استفاده‌شده ${money(u)}`}</p>
+        <button class="iconbtn sm" data-act="delacc" data-id="${esc(a.id)}" aria-label="حذف ${esc(a.name)}">${IC.x}</button></li>`; }).join('')}</ul>
       <div class="addcat"><input id="newcredit" placeholder="اعتبار جدید" aria-label="اعتبار جدید"><button class="btn small" data-act="addcredit">افزودن</button></div>
       <button class="btn small" data-act="saveacc">ذخیره</button></section>
     ${listEditor('bnpl', 'پلتفرم‌های خرید قسطی', 'توی فرم خرید قسطی به‌عنوان «پلتفرم» پیشنهاد می‌شن.')}
@@ -1101,8 +1150,8 @@
         const amount = readAmount(ov, 'amount');
         if (!amount) { toast('مبلغ رو وارد کن.', 'bad'); return false; }
         const cacc = type === 'expense' && S.accounts.find(a => a.id === $('#acc', ov).value && a.kind === 'credit');
-        if (cacc && cacc.limit) {
-          const used = creditUsed(cacc) - (t && t.account === cacc.id && t.type === 'expense' ? t.amount : 0);
+        if (cacc && cacc.limit && !(t && t.cs && t.account === cacc.id)) { // خرید تسویه‌شده دیگه از سقف کم نمی‌کنه
+          const used = creditUsed(cacc) - (t && t.account === cacc.id && t.type === 'expense' && !t.cs ? t.amount : 0);
           if (used + amount > cacc.limit && !confirm(`با این خرید از سقف ${cacc.name} (${money(cacc.limit)}) بیشتر می‌شه. باز هم ثبت بشه؟`)) return false;
         }
         const from = $('#acc', ov).value, to = type === 'transfer' ? $('#acc2', ov).value : '';
@@ -1112,8 +1161,11 @@
         Object.assign(rec, { type, amount, date: readDate(ov, 'date'), time: data.time || '', cat: type === 'transfer' ? '' : cat,
           account: from, note: $('#note', ov).value.trim() });
         if (type === 'transfer') rec.to = to; else delete rec.to;
+        // خرید تسویه‌شده که دیگه خرید اعتباری همون حساب نیست، از اون تسویه بیرون میاد
+        if (rec.cs && t && (type !== 'expense' || rec.account !== data.account)) delete rec.cs;
         const lv = type === 'expense' ? $('#link', ov).value : type === 'income' ? $('#inclink', ov).value : '';
-        const newLink = lv ? (([kind, id, key]) => ({ kind, id, key }))(lv.split('|')) : null;
+        // پرداخت صورت‌حساب اعتبار (انتقال) پیوندش رو نگه می‌داره
+        const newLink = oldLink && oldLink.kind === 'credit' && type === 'transfer' ? oldLink : lv ? (([kind, id, key]) => ({ kind, id, key }))(lv.split('|')) : null;
         const same = oldLink && newLink && oldLink.kind === newLink.kind && oldLink.id === newLink.id && oldLink.key === newLink.key;
         if (oldLink && !same) {
           const o = findOb(oldLink.kind, oldLink.id);
@@ -1144,6 +1196,7 @@
     });
   }
   function deleteTx(t) {
+    if (t.link && t.link.kind === 'credit') { unsettleCredit(t.link.id, t.link.key); if (!S.tx.includes(t)) return; }
     if (t.op) S.ops.forEach(o => { if (o.id === t.op && o.tx === t.id) { delete o.tx; delete o.bank; } });
     if (t.link) { const o = findOb(t.link.kind, t.link.id); if (o && o.paid && o.paid[t.link.key] && o.paid[t.link.key].txId === t.id) delete o.paid[t.link.key]; }
     if (t.debt) { const d = S.debts.find(x => x.id === t.debt); if (d) { d.settles = (d.settles || []).filter(x => x.txId !== t.id); if (debtLeft(d) > 0) delete d.closed; } }
@@ -1212,6 +1265,7 @@
   // پرداخت یک‌لمسی برای مبلغ ثابت؛ مورد متغیر مبلغ واقعی رو می‌پرسه
   function quickPay(kind, id, key) {
     const o = getOb(kind, id, key); if (!o || o.paid) return;
+    if (kind === 'credit') { openCreditPay(id, key); return; }
     if (assetIncome(kind, id)) { window.Inv.openSalary({ incomeId: id, key: String(key) }); return; }
     if (o.variable) { openPay(kind, id, key); return; }
     const t = { id: uid(), created: Date.now(), type: txTypeFor(kind), amount: o.estimate, date: today(), time: '', cat: kind === 'credit' ? '' : obDefaultCat(kind, id),
@@ -1236,6 +1290,11 @@
       const t = S.tx.find(x => x.id === o.auto.txId); if (t) t.noMatch = true;
       save(); refreshSheets(); render(); toast('جدا شد؛ این واریز دیگه درآمد ثابت حساب نمی‌شه.'); return;
     }
+    if (kind === 'credit') {
+      const a = findOb('credit', id), st = a && (a.settles || []).find(x => x.id === String(key)), b = st && S.accounts.find(x => x.id === st.bank);
+      if (!confirm(`تسویه‌ی «${o.name}» (${money(o.amount)}) برگرده؟ خریدهاش دوباره باز می‌شن${b ? ` و این مبلغ به موجودی ${b.name} برمی‌گرده` : ''}.`)) return;
+      unsettleCredit(id, key); save(); refreshSheets(); render(); toast('تسویه برگردانده شد.'); return;
+    }
     const opId = isInc(kind) && incPaidOp(id, key);
     if (opId && window.Inv && !window.Inv.canRemoveOp(opId)) return;
     if (!confirm(opId ? `دریافت «${o.name}» برگرده به «در انتظار»؟ دارایی‌ای که بابتش ثبت شده هم از دفتر سرمایه کم می‌شه.` : isInc(kind) ? `دریافت «${o.name}» برگرده به «در انتظار»؟ تراکنش واریزش هم حذف می‌شه.` : `پرداخت «${o.name}» برگرده به پرداخت‌نشده؟ تراکنش برداشتش هم حذف می‌شه.`)) return;
@@ -1244,6 +1303,7 @@
   function openPay(kind, id, key) {
     const o = getOb(kind, id, key); if (!o) return;
     if (o.paid) { askUnpay(kind, id, key); return; }
+    if (kind === 'credit') { openCreditPay(id, key); return; }
     if (assetIncome(kind, id)) { window.Inv.openSalary({ incomeId: id, key: String(key) }); return; }
     const inc = isInc(kind), ttype = txTypeFor(kind);
     const recent = S.tx.filter(t => t.type === ttype && !t.link && Math.abs(C.diffDays(t.date, today())) <= 45)
@@ -1811,7 +1871,7 @@
         $$('[data-acclim]').forEach(i => { const ac = S.accounts.find(x => x.id === i.dataset.acclim); if (!ac) return; const v = C.normDigits(i.value).replace(/\D/g, ''); ac.limit = v ? toRial(Number(v)) : 0; });
         save(); render(); toast('ذخیره شد.'); },
       addbank: () => { const n = ($('#newbank').value || '').trim().slice(0, 40); if (!n) return; S.accounts.push({ id: uid(), kind: 'bank', bank: n, num: '', name: n, balance: null, stamp: '' }); save(); render(); },
-      addcredit: () => { const n = ($('#newcredit').value || '').trim().slice(0, 40); if (!n) return; S.accounts.push({ id: uid(), kind: 'credit', name: n, limit: 0, paid: {} }); save(); render(); },
+      addcredit: () => { const n = ($('#newcredit').value || '').trim().slice(0, 40); if (!n) return; S.accounts.push({ id: uid(), kind: 'credit', name: n, limit: 0, paid: {}, settles: [] }); save(); render(); },
       addlist: () => { const k = b.dataset.key, n = ($('#newlist-' + k).value || '').trim().slice(0, 40); if (!n) return; S.lists[k] = [...new Set([...(S.lists[k] || []), n])]; save(); render(); },
       dellist: () => { const k = b.dataset.key; (S.lists[k] || []).splice(+b.dataset.i, 1); save(); render(); },
       delacc: () => { if (!confirm('این حساب حذف بشه؟ تراکنش‌هاش می‌مونن ولی دیگه به حسابی وصل نیستن.')) return;

@@ -111,6 +111,18 @@ with sync_playwright() as p:
     st = S()
     check('unreceive: salary op + tx removed, income pending', not any(o['type'] == 'salary' for o in st['ops']) and not any(t.get('type') == 'income' and t.get('op') for t in st['tx']) and not st['incomes'][0]['paid'], st['incomes'][0]['paid'])
     check('unreceive: «آمد» back to assumed salary', cf_in() == 1500000000)
+    # ۹) نسخه‌ی ۱۱٫۱: مانده‌ی اعتبار خرید در تنظیمات و فهرست حساب‌ها (سقف ثابت می‌مونه)
+    pg.evaluate("""(() => { const s = window.__vault.state; let c = s.accounts.find(a => a.kind === 'credit');
+      if (!c) { c = { id: 'C1', kind: 'credit', name: 'اسنپ‌پی اعتباری', limit: 100000000, paid: {} }; s.accounts.push(c); } c.limit = 100000000;
+      s.tx.push({ id: 'cr1', created: Date.now(), type: 'expense', amount: 20000000, date: J.today(), time: '', cat: 'خرید', account: c.id, note: '' });
+      window.App.save(); window.App.render(); })()"""); wait()
+    pg.evaluate("window.App.go('set')"); wait(500)
+    sec = pg.inner_text('section:has-text("اعتبار خرید (تسویه")')
+    check('settings: credit shows remaining 8M, ceiling stays 10M', 'مانده: 8000000' in fa(sec) and 'سقف کل' in sec, sec)
+    hub('add', '[data-type=expense]')
+    opts = pg.eval_on_selector('#acc', 'e => [...e.options].map(o => o.textContent).join("|")')
+    check('tx form: credit option shows remaining', 'مانده 8000000' in fa(opts), opts)
+    pg.evaluate("window.App.closeAll()"); wait(400)
     check('no console errors', not errors, errors)
     b.close()
 print(f'\n{len(passed)} passed, {len(failed)} failed')

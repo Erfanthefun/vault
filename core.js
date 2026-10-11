@@ -486,8 +486,71 @@
     return { balance: a.balance + delta, base: a.balance, delta, n };
   }
 
+  // ---------- اعتبار خرید (اسنپ‌پی، دیجی‌پی…) — نسخه‌ی ۱۱٫۲ ----------
+  // هر خرید اعتباری (برداشت با حساب اعتباری) تا وقتی تسویه نشده «باز» است و از سقف کم می‌کند.
+  // تسویه (a.settles[]: {id, ym, date, amount, txId, bank}) خریدهای بازِ همون ماه تا تاریخ تسویه رو می‌بنده (t.cs = settle.id).
+  // خریدهای بعد از تسویه (حتی در همون ماه) صورت‌حساب تازه می‌سازن. سررسید = آخر ماهِ خرید.
+  const isCreditBuy = (t, a) => t.type === 'expense' && t.account === a.id;
+  function creditOpen(state, a) { return state.tx.filter(t => isCreditBuy(t, a) && !t.cs); }
+  function creditUsed(state, a) { return creditOpen(state, a).reduce((s, t) => s + t.amount, 0); }
+  // صورت‌حساب‌های یک ماه: یک مورد باز (جمع خریدهای تسویه‌نشده‌ی اون ماه) + تسویه‌های انجام‌شده‌ی همون ماه
+  function creditStatements(state, a, ymStr) {
+    const [y, m] = ymStr.split('/').map(Number), last = jStr(y, m, monthLen(y, m)), out = [];
+    const open = creditOpen(state, a).filter(t => ym(t.date) === ymStr);
+    if (open.length) {
+      const sum = open.reduce((s, t) => s + t.amount, 0);
+      out.push({ open: true, key: ymStr, ym: ymStr, amount: sum, count: open.length, due: last, from: open.reduce((d, t) => t.date < d ? t.date : d, open[0].date) });
+    }
+    for (const s of (a.settles || [])) if (s.ym === ymStr) {
+      const t = s.txId && state.tx.find(x => x.id === s.txId);
+      out.push({ open: false, key: s.id, ym: ymStr, amount: t ? t.amount : s.amount, due: s.date, settle: s });
+    }
+    return out;
+  }
+  // ماه‌هایی که خرید باز دارن (برای «پیش رو»: همه‌ی صورت‌حساب‌های باز تا ماه جاری)
+  function creditOpenMonths(state, a) { return [...new Set(creditOpen(state, a).map(t => ym(t.date)))].sort(); }
+  // تسویه: خریدهای باز ماه ymStr با تاریخ ≤ date بسته می‌شن. خروجی: فهرست خریدها و جمعشون (بدون تغییر داده)
+  function creditSettleSet(state, a, ymStr, date) {
+    const list = creditOpen(state, a).filter(t => ym(t.date) === ymStr && t.date <= date);
+    return { list, amount: list.reduce((s, t) => s + t.amount, 0) };
+  }
+  // مهاجرت از مدل قدیمی (a.paid['YYYY/MM'] = {date, txId}): خریدهای اون ماه که قبل از تسویه ثبت شدن بسته می‌شن،
+  // خریدهایی که بعد از تیک ثبت شدن (در نسخه‌های قبل گم می‌شدن) باز می‌مونن. idempotent.
+  function migrateCredit(state) {
+    for (const a of state.accounts) {
+      if (a.kind !== 'credit') continue;
+      a.settles = Array.isArray(a.settles) ? a.settles.filter(s => s && s.id && /^\d{4}\/\d{2}$/.test(s.ym || '')) : [];
+      const paid = a.paid && typeof a.paid === 'object' ? a.paid : {};
+      for (const k of Object.keys(paid)) {
+        const info = paid[k] || {}; delete paid[k];
+        if (!/^\d{4}\/\d{2}$/.test(k)) continue;
+        const id = 'L' + k.replace('/', '');
+        if (a.settles.some(s => s.id === id)) continue;
+        const st = info.txId && state.tx.find(x => x.id === info.txId);
+        const cut = st && st.created ? st.created : null;
+        let amount = 0;
+        for (const t of state.tx) {
+          if (!isCreditBuy(t, a) || t.cs || ym(t.date) !== k) continue;
+          if (cut && t.created && t.created > cut) continue; // بعد از تیک ثبت شده → هنوز بازه
+          t.cs = id; amount += t.amount;
+        }
+        if (st) { st.link = { kind: 'credit', id: a.id, key: id }; }
+        a.settles.push({ id, ym: k, date: /^\d{4}\/\d{2}\/\d{2}$/.test(info.date || '') ? info.date : (st ? st.date : jStr(+k.slice(0, 4), +k.slice(5, 7), 1)),
+          amount: st ? st.amount : amount, txId: st ? st.id : '', bank: st ? (st.account || '') : '' });
+      }
+      a.paid = {};
+      // خریدی که به تسویه‌ی ناموجود اشاره کنه دوباره باز می‌شه
+      const ids = new Set(a.settles.map(s => s.id));
+      for (const t of state.tx) if (t.cs && isCreditBuy(t, a) && !ids.has(t.cs)) delete t.cs;
+    }
+    // خریدی که دیگه اعتباری نیست (حساب عوض شده) علامت تسویه نداره
+    const credIds = new Set(state.accounts.filter(a => a.kind === 'credit').map(a => a.id));
+    for (const t of state.tx) if (t.cs && !(t.type === 'expense' && credIds.has(t.account))) delete t.cs;
+  }
+
   root.Core = { toJ, toG, today, ym, addMonths, addYm, addDays, diffDays, monthLen, jParse, jStr, pad,
     MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomeMatches, incomesForMonth, openObligations, monthStats, loanDue, loanSummary,
-    ymIndex, monthOutflow, cashFlow, txAccountDelta, afterAnchor, accountBalance, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis };
+    ymIndex, monthOutflow, cashFlow, txAccountDelta, afterAnchor, accountBalance, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis,
+    creditOpen, creditUsed, creditStatements, creditOpenMonths, creditSettleSet, migrateCredit };
   root.J = root.Core;
 })(typeof window !== 'undefined' ? window : globalThis);
