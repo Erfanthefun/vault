@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۱۲';
+  const VERSION = '۱۳';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -488,6 +488,7 @@
         ${cf.assumed ? `<p class="fparts">${esc(cf.assumedNames.join('، '))} طبق برنامه حساب شده (روزش رسیده ولی «دریافت شد» نخورده).</p>` : ''}
         <div class="fl out"><span>رفت <i>(قسط، قبض، روزمره)</i></span><b><bdi dir="ltr">${cf.out ? '−' : ''}${money(cf.out, false)}</bdi></b></div>
         <div class="fbar" aria-hidden="true"><i class="out" style="width:${barW(cf.out)}%"></i></div>
+        ${cf.loanIn ? `<p class="fparts">+${money(cf.loanIn, false)} دریافت وام (جدا از آمد ماه، به موجودی اضافه شد)</p>` : ''}
         ${cf.out ? `<p class="fparts">قسط ${money(cf.loans, false)}، قبض ${money(cf.bills, false)}، روزمره ${money(cf.daily, false)}</p>` : ''}
       </div>
       <div class="save">
@@ -622,7 +623,7 @@
   function txRow(t) {
     const sign = t.type === 'income' ? '+' : t.type === 'expense' ? '−' : '';
     const o = opOf(t), dt = t.type === 'transfer' ? debtTxTitle(t) : '';
-    const title = t.cat || dt || (t.debt ? 'بدهی و طلب' : t.type === 'transfer' ? (o ? opTitleFa(o) : 'انتقال داخلی') : 'بدون دسته');
+    const title = t.cat || (t.loanRecv ? 'دریافت وام' : '') || dt || (t.debt ? 'بدهی و طلب' : t.type === 'transfer' ? (o ? opTitleFa(o) : 'انتقال داخلی') : 'بدون دسته');
     // دارایی غیرریالی: «۱۰ تتر در والکس» (تراکنش وابسته به عملیات) یا «۲ گرم طلا» (بدون حساب)
     const side = o && (o.type === 'send' || o.type === 'recv' || o.type === 'salary') ? (o.out || o.in) : null;
     const qty = side && side.a !== 'irr' ? `${V.fmtQty(side.q, side.a)} ${assetUnit(side.a)}${o.loc ? (o.type === 'send' ? ' از ' : ' به ') + placeLbl(o.loc) : ''}`
@@ -1230,6 +1231,7 @@
     if (ref) {
       const t = ref.tx && S.tx.find(x => x.id === ref.tx);
       if (ref.tx && !t) return;
+      if (t && t.loanRecv && S.loans.some(l => l.id === t.loanRecv)) { openLoanForm(t.loanRecv); return; }
       // تراکنشی که با فرم‌های دفتر دارایی ساخته شده (حقوق تتری، صرافی ↔ بانک، …) از همون فرم ویرایش می‌شه
       if (t && t.op && S.ops.some(o => o.id === t.op && !o.via) && window.Inv && window.Inv.editOp(t.op)) return;
       E = Flow.read(S, ref); if (!E) return;
@@ -1623,6 +1625,7 @@
   function openLoanForm(id) {
     const l = id ? S.loans.find(x => x.id === id) : null;
     let type = l ? (l.restDay ? 'bnpl' : 'bank') : 'bank', typeTouched = !!l;
+    const R = l && l.recv ? l.recv : null;
     const html = `
       <div class="chips seg" id="ltype" role="group" aria-label="نوع اقساط">${[['bank', 'وام بانکی'], ['bnpl', 'خرید قسطی (اسنپ‌پی، دیجی‌پی…)']].map(([k, n]) => `<button type="button" class="chip ${type === k ? 'on' : ''}" data-t="${k}" aria-pressed="${type === k}">${n}</button>`).join('')}</div>
       <label class="lbl" for="llender" id="llenderlbl">وام‌دهنده</label><select id="llender" data-list="${type === 'bnpl' ? 'bnpl' : 'lenders'}">${lenderOptions(type === 'bnpl' ? 'bnpl' : 'lenders', l ? l.lender : '')}</select>
@@ -1633,6 +1636,13 @@
       <label class="lbl" id="lfirstlbl">تاریخ</label>${dateField('lfirst', l ? l.first : today())}
       <div id="restwrap"><label class="lbl" for="lrest">اقساط بعدی روز چندم ماه‌ان؟</label><input id="lrest" inputmode="numeric" value="${faDigits(l && l.restDay ? l.restDay : bnplDay())}"></div>
       <p class="summary" id="lprev" aria-live="polite"></p>
+      <div id="recvwrap"><label class="check"><input type="checkbox" id="lrecv" ${R ? 'checked' : ''}> مبلغ وام به حسابم واریز شد</label>
+        <div id="recvbox" ${R ? '' : 'hidden'}>
+          <label class="lbl">مبلغ دریافتی</label>${amountInput('lrecvamt', R ? R.amount : 0)}
+          <label class="lbl" for="lrecvacc">به کدوم حساب؟</label><select id="lrecvacc">${accOptions(R ? R.account : (bankAccounts().find(a => a.id === S.settings.lastBank) || bankAccounts()[0] || {}).id || '')}</select>
+          <label class="lbl">تاریخ دریافت</label>${dateField('lrecvdate', R ? R.date : today())}
+          <p class="note">موجودی حساب بالا می‌ره، ولی جزو «آمد» ماه حساب نمی‌شه (وام درآمد نیست).</p>
+        </div></div>
       <label class="lbl" for="lcat">دسته‌ی خرج</label><select id="lcat">${withSel(['وام', ...S.categories.expense.filter(c => c !== 'وام')], l && l.cat).map(c => `<option ${c === ((l && l.cat) || 'وام') ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
       ${!l ? `<label class="lbl" for="lpaid">چند قسط تا حالا پرداخت شده؟</label><input id="lpaid" inputmode="numeric" placeholder="۰">
         <label class="check" id="firsttxwrap"><input type="checkbox" id="firsttx"> برداشت قسط اول (روز خرید) رو هم در تراکنش‌ها ثبت کن</label>` : ''}
@@ -1646,6 +1656,7 @@
         const ls = $('#llender', ov), want = type === 'bnpl' ? 'bnpl' : 'lenders';
         if (ls.dataset.list !== want) { const keep = ls.value; ls.dataset.list = want; ls.innerHTML = lenderOptions(want, keep === '__newlender' ? '' : keep); }
         $('#llenderlbl', ov).textContent = type === 'bnpl' ? 'پلتفرم خرید قسطی' : 'وام‌دهنده';
+        $('#recvwrap', ov).hidden = type !== 'bank'; $('#recvbox', ov).hidden = !$('#lrecv', ov).checked;
         if (!l) {
           $('#firsttxwrap', ov).hidden = type !== 'bnpl';
           if (type === 'bnpl' && !$('#lpaid', ov).dataset.touched) $('#lpaid', ov).value = '۱';
@@ -1676,6 +1687,9 @@
         const name = ($('#lname', ov).value.trim() || (type === 'bnpl' ? [lender, store].filter(Boolean).join('، ') : '')).slice(0, 60);
         const amount = readAmount(ov, 'lamount'), count = readInt($('#lcount', ov));
         if (!name || !amount || !count || count > 600) { toast(type === 'bnpl' ? 'پلتفرم یا نام، مبلغ قسط و تعداد اقساط (۱ تا ۶۰۰) لازمه.' : 'نام، مبلغ قسط و تعداد اقساط (۱ تا ۶۰۰) لازمه.', 'bad'); return false; }
+        const recvOn = type === 'bank' && $('#lrecv', ov).checked;
+        const recv = recvOn ? { amount: readAmount(ov, 'lrecvamt'), account: $('#lrecvacc', ov).value, date: readDate(ov, 'lrecvdate') } : null;
+        if (recv && (!recv.amount || !recv.account || recv.account === '__newbank')) { toast('برای واریز وام، مبلغ دریافتی و حساب لازمه.', 'bad'); return false; }
         const d = draft();
         const rec = l || { id: uid(), paid: {} };
         Object.assign(rec, { name, lender, amount, count, first: d.first, cat: $('#lcat', ov).value });
@@ -1691,13 +1705,23 @@
           }
           S.loans.push(rec);
         } else Object.keys(rec.paid).forEach(k => { if (+k >= count) unmarkPaid('loan', rec.id, k); });
+        syncLoanRecv(rec, recv);
         save(); closeAll(); obTab = 'loan'; if (tab !== 'ob') go('ob'); else render(); toast(l ? 'ذخیره شد.' : `${type === 'bnpl' ? 'خرید قسطی' : 'وام'} اضافه شد.`);
       });
       if (l) $('#ldel', ov).addEventListener('click', () => {
         if (!confirm(`«${l.name}» و سابقه‌ی اقساطش حذف بشه؟ تراکنش‌هایی که ثبت شدن می‌مونن.`)) return;
-        unlinkAllFor(l.id); S.loans = S.loans.filter(x => x !== l); save(); closeAll(); render(); toast('حذف شد.');
+        syncLoanRecv(l, null); unlinkAllFor(l.id); S.loans = S.loans.filter(x => x !== l); save(); closeAll(); render(); toast('حذف شد.');
       });
     });
+  }
+  // دریافت وام: یک «انتقال» از بیرون به حساب بانکی (موجودی بالا می‌ره، جزو آمد ماه نیست). rec.recv = { amount, account, date, txId }
+  function syncLoanRecv(rec, recv) {
+    let t = S.tx.find(x => x.loanRecv === rec.id);
+    if (!recv) { if (t) S.tx = S.tx.filter(x => x !== t); delete rec.recv; return; }
+    if (!t) { t = { id: uid(), created: Date.now(), time: '' }; S.tx.push(t); }
+    Object.assign(t, { type: 'transfer', amount: recv.amount, date: recv.date, cat: '', account: '', to: recv.account, note: `دریافت وام: ${rec.name}`, loanRecv: rec.id });
+    rec.recv = { ...recv, txId: t.id };
+    S.settings.lastBank = recv.account;
   }
   function loanDetailHtml(l) {
     const s = C.loanSummary(l), t = today();
@@ -1711,6 +1735,7 @@
     return `
       <div class="sums"><div class="sum"><span>مانده‌ی بدهی</span><b>${money(s.remainingAmount)}</b></div><div class="sum"><span>اقساط باقی‌مانده</span><b>${faDigits(s.remainingCount)} از ${faDigits(l.count)}</b></div></div>
       ${l.total ? `<p class="note">مبلغ کل: ${money(l.total)}</p>` : ''}
+      ${l.recv ? `<p class="note">دریافتی: ${money(l.recv.amount)} در ${dateTitle(l.recv.date)} به ${esc((S.accounts.find(a => a.id === l.recv.account) || {}).name || 'حساب حذف‌شده')}؛ جمع اقساط ${money(l.amount * l.count)}، ${l.amount * l.count >= l.recv.amount ? `سود وام ${money(l.amount * l.count - l.recv.amount)}` : `کمتر از دریافتی: ${money(l.recv.amount - l.amount * l.count)}`}</p>` : ''}
       <p class="note">روی هر قسط بزن تا پرداختش رو ثبت کنی یا برگردونیش.</p>
       <ul class="inst">${rows}</ul>
       <button class="btn wide ghost" data-ledit>ویرایش</button>`;

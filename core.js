@@ -340,7 +340,8 @@
     const assumed = due.reduce((s, i) => s + i.amount, 0);
     const pending = inc.filter(i => !i.paid && !(todayStr && i.due <= todayStr)).reduce((s, i) => s + i.amount, 0);
     const tin = got + assumed + other, out = loans + bills + daily, net = tin - out;
-    return { in: tin, out, loans, bills, daily, net, rate: tin > 0 ? net / tin : null, assumed, assumedNames: due.map(i => i.name), pending };
+    const loanIn = state.tx.filter(t => t.loanRecv && ym(t.date) === ymStr && (!todayStr || t.date <= todayStr)).reduce((s, t) => s + (t.amount || 0), 0);
+    return { in: tin, out, loans, bills, daily, net, loanIn, rate: tin > 0 ? net / tin : null, assumed, assumedNames: due.map(i => i.name), pending };
   }
   function categoryTotals(state, ymStr) {
     const m = {};

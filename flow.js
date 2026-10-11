@@ -439,6 +439,7 @@
     const t = item.t;
     if (t.type === 'expense') return 'out';
     if (t.type === 'income') return 'in';
+    if (t.loanRecv) return 'in';
     if (WHY.out.includes(t.why) && t.why !== 'gift') return 'out';
     if (WHY.in.includes(t.why) && t.why !== 'gift') return 'in';
     if (t.debt) { const d = (state.debts || []).find(x => x.id === t.debt); if (d) return d.dir === 'owe' ? 'out' : 'in'; }
