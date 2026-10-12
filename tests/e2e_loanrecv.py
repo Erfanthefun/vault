@@ -1,4 +1,4 @@
-"""تست end-to-end نسخه‌ی ۱۳: دریافت وام — مبلغ وام به موجودی حساب اضافه می‌شه، جزو آمد ماه نیست،
+"""تست end-to-end نسخه‌ی ۱۳ (به‌روز برای ۱۴): دریافت وام از فرم «افزودن وام» — مبلغ وام به موجودی حساب اضافه می‌شه، جزو آمد ماه نیست،
 در تراکنش‌ها و کارت جریان نقدی دیده می‌شه، با ویرایش به‌روز و با حذف وام پاک می‌شه؛ وام‌های قبلی دست نمی‌خورن"""
 import re, sys
 from playwright.sync_api import sync_playwright
@@ -60,8 +60,8 @@ with sync_playwright() as p:
     check('tx list shows receipt', 'دریافت وام' in txt and 'وام جدید' in txt)
     # زدن روی ردیف، فرم وام رو باز می‌کنه
     pg.click('.txrow:has-text("دریافت وام")'); wait(500)
-    check('row opens loan form', pg.is_visible('#lsave') and pg.is_checked('#lrecv'))
-    pg.fill('.sheet [name=lrecvamt]', '180000000'); pg.select_option('#lrecvacc', 'SM'); pg.click('#lsave'); closed()
+    check('row opens deposit form with loan fields', pg.is_visible('#savetx') and pg.input_value('#lnname') == 'وام جدید' and pg.get_attribute('#twhy [data-w=loan]', 'aria-pressed') == 'true')
+    pg.fill('.sheet [name=amount]', '180000000'); pg.select_option('#acc', 'SM'); wait(150); pg.click('#savetx'); closed()
     st = S()
     check('edit keeps single tx', len([t for t in st['tx'] if t.get('loanRecv')]) == 1)
     check('edit moves money', bal('BL') == 1000000000 and bal('SM') == 380000000, (bal('BL'), bal('SM')))
@@ -92,9 +92,9 @@ with sync_playwright() as p:
     check('bnpl hides receipt', not pg.is_visible('#lrecv'))
     pg.evaluate("window.App.closeAll()"); wait()
     # بدون حساب: خطا
-    hub('newloan'); pg.fill('#lname', 'بی‌حساب'); pg.fill('.sheet [name=lamount]', '1000000'); pg.fill('#lcount', '3')
-    pg.check('#lrecv'); pg.fill('.sheet [name=lrecvamt]', '3000000'); pg.select_option('#lrecvacc', ''); pg.click('#lsave'); wait()
-    check('requires account', pg.is_visible('#lsave') and not any(l['name'] == 'بی‌حساب' for l in S()['loans']))
+    hub('newloan'); pg.fill('#lname', 'بی‌مبلغ'); pg.fill('.sheet [name=lamount]', '1000000'); pg.fill('#lcount', '3')
+    pg.check('#lrecv'); pg.click('#lsave'); wait()
+    check('requires received amount', pg.is_visible('#lsave') and not any(l['name'] == 'بی‌مبلغ' for l in S()['loans']))
     pg.evaluate("window.App.closeAll()"); wait()
 
     # بعد از بارگذاری دوباره داده‌ها می‌مونن

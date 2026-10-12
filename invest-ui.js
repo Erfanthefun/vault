@@ -188,7 +188,7 @@
     // نسخه‌ی ۱۲: از فرم برداشت/واریز (هر دارایی، هر حساب) ساخته می‌شن
     send: { t: 'برداشت', ic: 'withdraw', hidden: true }, recv: { t: 'واریز', ic: 'deposit', hidden: true }
   };
-  const WHY_T = { send: { expense: 'خرج', gift: 'هدیه دادم', lend: 'قرض دادم', repay: 'پرداخت بدهی' }, recv: { income: 'درآمد', gift: 'هدیه گرفتم', borrow: 'قرض گرفتم', collect: 'دریافت طلب' } };
+  const WHY_T = { send: { expense: 'خرج', gift: 'هدیه دادم', lend: 'قرض دادم', repay: 'پرداخت بدهی' }, recv: { income: 'درآمد', gift: 'هدیه گرفتم', borrow: 'قرض گرفتم', collect: 'دریافت طلب', loan: 'دریافت وام' } };
   function opTitle(o) {
     const A = x => ASSETS[x.a].name;
     switch (o.type) {

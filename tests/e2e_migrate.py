@@ -80,7 +80,8 @@ with sync_playwright() as p:
         pg.on('dialog', lambda d: d.accept())
         pg.goto(url); pg.wait_for_load_state('networkidle'); pg.wait_for_timeout(400); return pg
     old = page(OLD)
-    check('old app is 11.2', old.evaluate("fetch('app.js').then(r => r.text()).then(t => t.includes(\"VERSION = '۱۱٫۲'\"))"))
+    OLDV = os.environ.get('OLD_VERSION', '۱۱٫۲')  # مثلاً OLD_VERSION=۱۳ برای مقایسه‌ی ۱۳ → ۱۴
+    check(f'old app is {OLDV}', old.evaluate(f"fetch('app.js').then(r => r.text()).then(t => t.includes(\"VERSION = '{OLDV}'\"))"))
     old.evaluate(SEED); old.reload(); old.wait_for_timeout(500)
     A = old.evaluate(METRICS); raw = old.evaluate("localStorage.getItem('vault-v1')")
     check('old: seeded data valid (no ledger errors, nothing dropped)', A['errors'] == 0 and A['counts'][0] == 15 and A['counts'][1] == 14, A['counts'])

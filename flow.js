@@ -1,4 +1,4 @@
-/* Vault نسخه‌ی ۱۲ — ثبت یکپارچه: برداشت، واریز، انتقال و تبدیل با هر دارایی در هر حساب (منطق خالص و قابل تست با node)
+/* Vault نسخه‌ی ۱۴ (از ۱۲) — ثبت یکپارچه: برداشت، واریز، انتقال و تبدیل با هر دارایی در هر حساب (منطق خالص و قابل تست با node)
  *
  * «حساب» = هر جایی که پول یا دارایی هست: حساب بانکی، صرافی/پلتفرم/محل نگهداری (locations)، اعتبار خرید، یا «بدون حساب».
  * هر حساب هر دارایی‌ای رو می‌تونه نگه داره. ریالِ حساب‌های بانکی (و اعتبار خرید) مثل قبل در تراکنش‌ها (tx) و موجودی زنده‌ی حساب
@@ -10,6 +10,10 @@
  *       · برای جریان نقدی (خرج، هدیه، درآمد) با معادل تومانی و بدون حساب بانکی
  *       · یا برای موجودی حساب بانکی (تبدیل/انتقال بین صرافی و بانک؛ مثل «صرافی ↔ بانک»)
  * بدهی و طلب: «قرض دادم/گرفتم» یک مورد تازه می‌سازه (d.src → رکورد اصلی)، «پرداخت بدهی/دریافت طلب» یک تسویه (d.settles).
+ * وام (نسخه‌ی ۱۴): «واریز › وام» دریافت وام رو ثبت می‌کنه (مثل قرض گرفتم، در آمد ماه نیست) و وامش رو در «اقساط» می‌سازه یا به‌روز می‌کنه
+ *   (E.loan = فیلدهای وام، یا E.loanId = وامی که از قبل هست). پیوند: رکورد اصلی.loanRecv ↔ loan.recv = { asset, amount, account, date, txId|opId }.
+ *   وامی که از همین فرم ساخته شده (src: 'flow') و قسط پرداخت‌شده نداره، با حذف یا عوض کردن این ثبت حذف می‌شه.
+ * برنامه‌ی بازپرداخت قرض (نسخه‌ی ۱۴): E.due (یک تاریخ) یا E.plan = { amount, first } (قسطی)؛ d.sched = از کِی در آمار ماه حساب می‌شه.
  * کارمزدها حساب نمی‌شن (انتخاب کاربر): انتقال = یک مقدار؛ در تبدیل هر طرف همون مقداریه که واقعاً جابه‌جا شده.
  *
  * ذخیره و حذف تراکنشی‌ان: روی یک کپی انجام می‌شن و فقط اگه همه‌چیز درست بود (از جمله منفی نشدن هیچ موجودی) روی داده می‌شینن.
@@ -19,11 +23,11 @@
   const J = root.J, V = root.V;
 
   const KINDS = ['out', 'in', 'move', 'conv'];
-  const WHY = { out: ['expense', 'gift', 'lend', 'repay'], in: ['income', 'gift', 'borrow', 'collect'] };
+  const WHY = { out: ['expense', 'gift', 'lend', 'repay'], in: ['income', 'gift', 'borrow', 'collect', 'loan'] };
   const CASH = ['expense', 'income', 'gift'];        // در «آمد» و «رفت» ماه حساب می‌شن
   const DEBT_NEW = ['lend', 'borrow'], DEBT_SETTLE = ['repay', 'collect'];
   const GIFT_CAT = { out: 'کادو', in: 'هدیه' };
-  const WHY_NAME = { expense: 'خرج', income: 'درآمد', gift: 'هدیه', lend: 'قرض دادم', borrow: 'قرض گرفتم', repay: 'پرداخت بدهی', collect: 'دریافت طلب' };
+  const WHY_NAME = { expense: 'خرج', income: 'درآمد', gift: 'هدیه', lend: 'قرض دادم', borrow: 'قرض گرفتم', repay: 'پرداخت بدهی', collect: 'دریافت طلب', loan: 'دریافت وام' };
   const DATE_RE = /^\d{4}\/\d{2}\/\d{2}$/;
   const clone = o => JSON.parse(JSON.stringify(o));
   const unitFa = a => V.ASSETS[a].fa || V.ASSETS[a].unit;
@@ -130,11 +134,12 @@
     } else return null;
     const prim = op || tx;
     const mk = DEBT_NEW.includes(prim.why) && prim.debt ? state.debts.find(d => d.id === prim.debt) || null : null;
-    return { tx, op, ltx, mk, prim };
+    const ml = prim.loanRecv ? (state.loans || []).find(l => l.id === prim.loanRecv) || null : null;
+    return { tx, op, ltx, mk, ml, prim };
   }
   function blank() {
     return { kind: 'out', why: 'expense', acc: '', asset: 'irr', q: 0, acc2: '', asset2: 'irr', q2: 0, value: null, date: J.today(), time: '', note: '', cat: '',
-      link: null, person: '', due: null, debt: '', pieces: null, pieces2: null, lockKind: false };
+      link: null, person: '', due: null, plan: null, debt: '', pieces: null, pieces2: null, lockKind: false, loan: null, loanId: '' };
   }
   function read(state, ref) {
     const c = collect(state, ref); if (!c) return null;
@@ -168,7 +173,7 @@
       else if (t.type === 'income') Object.assign(E, { kind: 'in', why: t.why === 'gift' ? 'gift' : 'income', acc: t.account || '' });
       else {
         const hasTo = 'to' in t, d = t.debt && state.debts.find(x => x.id === t.debt);
-        let why = WHY.out.includes(t.why) || WHY.in.includes(t.why) ? t.why : null;
+        let why = WHY.out.includes(t.why) || WHY.in.includes(t.why) ? t.why : t.loanRecv ? 'loan' : null;
         if (!why && t.debt && d) why = d.dir === 'owed' ? 'collect' : 'repay';
         if (why && WHY.out.includes(why) && why !== 'gift') Object.assign(E, { kind: 'out', why, acc: t.account || '' });
         else if (why && why !== 'gift') Object.assign(E, { kind: 'in', why, acc: hasTo ? (t.to || '') : (t.account || '') });
@@ -179,7 +184,11 @@
       }
     }
     if (E.kind === 'move') { E.asset2 = E.asset; E.q2 = E.q; E.pieces2 = E.pieces; }
-    if (c.mk) { E.person = c.mk.person || ''; E.due = c.mk.due || null; E.debt = ''; }
+    if (c.mk) { E.person = c.mk.person || ''; E.due = c.mk.due || null; E.plan = c.mk.plan ? { ...c.mk.plan } : null; E.debt = ''; }
+    if (c.ml) {
+      const l = c.ml; Object.assign(E, { kind: 'in', why: 'loan', loanId: l.id });
+      E.loan = { name: l.name, lender: l.lender || '', unit: l.unit || 'irr', amount: l.amount, count: l.count, first: l.first, cat: l.cat || '' };
+    }
     E.ref = c.op ? { op: c.op.id } : { tx: c.tx.id };
     return E;
   }
@@ -204,6 +213,22 @@
     if (DEBT_NEW.includes(E.why) && !String(E.person || '').trim()) return E.why === 'lend' ? 'به کی قرض دادی؟ اسمش رو بنویس.' : 'از کی قرض گرفتی؟ اسمش رو بنویس.';
     if (DEBT_SETTLE.includes(E.why) && !E.debt) return E.why === 'repay' ? 'کدوم بدهی رو پرداخت کردی؟ انتخابش کن.' : 'کدوم طلب رو گرفتی؟ انتخابش کن.';
     if (E.due && !DATE_RE.test(E.due)) return 'موعد معتبر نیست.';
+    if (E.plan && DEBT_NEW.includes(E.why)) {
+      if (!safeQ(Math.round(+E.plan.amount || 0))) return 'مبلغ هر قسط رو وارد کن.';
+      if (!DATE_RE.test(E.plan.first || '')) return 'تاریخ اولین قسط معتبر نیست.';
+    }
+    if (E.why === 'loan') {
+      const L = E.loan;
+      if (!L && !E.loanId) return 'مشخصات وام رو وارد کن.';
+      if (L) {
+        if (!String(L.name || '').trim()) return 'اسم وام رو بنویس.';
+        if (!V.ASSETS[L.unit || 'irr']) return 'واحد اقساط معتبر نیست.';
+        if (!safeQ(Math.round(+L.amount || 0))) return 'مبلغ هر قسط رو وارد کن.';
+        if (!(L.count >= 1 && L.count <= 600)) return 'تعداد اقساط (۱ تا ۶۰۰) لازمه.';
+        if (!DATE_RE.test(L.first || '')) return 'تاریخ اولین قسط معتبر نیست.';
+      }
+      if (place(state, E.acc) && place(state, E.acc).kind === 'credit') return 'وام به اعتبار خرید واریز نمی‌شه.';
+    }
     if (E.value !== null && E.value !== undefined && !(Number.isFinite(E.value) && E.value >= 0)) return 'معادل تومانی معتبر نیست.';
     return null;
   }
@@ -217,6 +242,11 @@
     E.cat = String(E.cat || ''); E.time = E.time || ''; E.acc = E.acc || ''; E.acc2 = E.acc2 || '';
     if (E.asset !== 'bar') E.pieces = null;
     if (E.asset2 !== 'bar') E.pieces2 = null;
+    if (!DEBT_NEW.includes(E.why)) { E.plan = null; }
+    if (E.plan) { E.plan = { amount: Math.round(+E.plan.amount || 0), first: E.plan.first }; E.due = null; }
+    if (E.why !== 'loan') { E.loan = null; E.loanId = ''; }
+    if (E.loan) { const L = E.loan; E.loan = { name: String(L.name || '').trim().slice(0, 60), lender: String(L.lender || '').trim().slice(0, 40), unit: L.unit && V.ASSETS[L.unit] ? L.unit : 'irr',
+      amount: Math.round(+L.amount || 0), count: Math.round(+L.count || 0), first: L.first, cat: String(L.cat || ''), paidCount: Math.max(0, Math.round(+L.paidCount || 0)) }; }
     return E;
   }
   const side = (a, q, pieces) => { const s = { a, q }; if (a === 'bar' && pieces && Object.keys(pieces).length) s.pieces = pieces; return s; };
@@ -339,7 +369,10 @@
       if (d && (d.settles || []).length && d.asset !== E.asset) return { err: 'این قرض تسویه‌ی ثبت‌شده داره؛ دارایی‌اش رو نمی‌شه عوض کرد.' };
       const fresh = !d;
       if (!d) { d = { id: ctx.uid(), settles: [], note: E.note }; T.debts.push(d); }
+      const wasSched = !fresh && !!(d.due || d.plan);
       Object.assign(d, { dir: E.why === 'lend' ? 'owed' : 'owe', person: E.person, asset: E.asset, amount: E.q, date: E.date, due: E.due || null, src: primRef });
+      if (E.plan) d.plan = { amount: E.plan.amount, first: E.plan.first }; else delete d.plan;
+      if (d.due || d.plan) { if (!wasSched || !d.sched) d.sched = fresh ? E.date : J.today(); } else delete d.sched;
       if (debtLeft(d) > 0) delete d.closed; else if (!d.closed) d.closed = E.date;
       prim.debt = d.id;
       info.debt = { made: fresh, id: d.id, dir: d.dir, person: d.person };
@@ -365,7 +398,50 @@
       }
     }
     if (prim.debt === undefined) delete prim.debt;
+
+    // ۳) وام
+    delete prim.loanRecv;
+    const ml = old && old.ml ? T.loans.find(l => l.id === old.ml.id) : null;
+    if (E.why === 'loan') {
+      let l = E.loanId ? T.loans.find(x => x.id === E.loanId) : ml;
+      const fresh = !l;
+      if (E.loanId && !l) return { err: 'وام پیدا نشد.' };
+      if (E.loan) {
+        const L = E.loan;
+        if (!l) { l = { id: ctx.uid(), paid: {}, src: 'flow' }; T.loans.push(l); }
+        const unit = L.unit === 'irr' ? undefined : L.unit;
+        if (!fresh && (l.unit || undefined) !== unit && Object.keys(l.paid || {}).length) return { err: 'این وام قسط پرداخت‌شده داره؛ واحد اقساطش رو نمی‌شه عوض کرد.' };
+        Object.assign(l, { name: L.name, lender: L.lender, amount: L.amount, count: L.count, first: L.first, cat: L.cat || 'وام' });
+        if (unit) l.unit = unit; else delete l.unit;
+        delete l.restDay; delete l.store;
+        l.paid = l.paid || {};
+        for (const k of Object.keys(l.paid)) if (+k >= l.count) {
+          const pi = l.paid[k]; delete l.paid[k];
+          const pt = pi && pi.txId && T.tx.find(x => x.id === pi.txId);
+          if (pt) { if (pt.auto && !pt.op) T.tx = T.tx.filter(x => x !== pt); else delete pt.link; }
+        }
+        if (fresh) for (let i = 0; i < Math.min(l.count, L.paidCount || 0); i++) l.paid[i] = { date: J.addMonths(l.first, i, J.jParse(l.first).d), prior: true };
+      }
+      if (ml && ml !== l) dropLoanRecv(T, ml, ctx);
+      // هر وام فقط یک دریافت: اگه این وام دریافت دیگه‌ای داشت، اون رکورد از وام جدا می‌شه (خود تراکنش می‌مونه)
+      if (l.recv) { const oid = l.recv.txId || l.recv.opId; if (oid && oid !== prim.id) { const ox = T.tx.find(x => x.id === oid) || T.ops.find(x => x.id === oid); if (ox) delete ox.loanRecv; } }
+      l.recv = { asset: E.asset, amount: E.q, account: E.acc, date: E.date }; l.recv[primKind === 'op' ? 'opId' : 'txId'] = prim.id;
+      prim.loanRecv = l.id;
+      info.loan = { made: fresh, id: l.id, name: l.name };
+    } else if (ml) {
+      const r = dropLoanRecv(T, ml, ctx); if (r) info[r] = ml.id;
+    }
     return { ref: primRef, info };
+  }
+  // جدا کردن دریافت از وام؛ وامی که از فرم واریز ساخته شده و قسطی ازش پرداخت نشده، حذف می‌شه (مگر ctx.keepLoan)
+  function dropLoanRecv(T, l, ctx) {
+    delete l.recv;
+    if (l.src === 'flow' && !Object.keys(l.paid || {}).length && !(ctx && ctx.keepLoan)) {
+      T.loans = T.loans.filter(x => x.id !== l.id);
+      T.tx.forEach(t => { if (t.link && t.link.kind === 'loan' && t.link.id === l.id) delete t.link; });
+      return 'removedLoan';
+    }
+    return 'keptLoan';
   }
   // مقدار تسویه به واحد خودِ بدهی/طلب (اگه با دارایی دیگه‌ای پرداخت شده، با ارزش تومانی تبدیل می‌شه)
   function settleQty(T, d, E) {
@@ -404,7 +480,7 @@
   }
 
   // ---------- حذف ----------
-  function remove(state, ref) {
+  function remove(state, ref, opts) {
     const before = new Set(V.replay(state).errors.map(errKey));
     const T = clone(state);
     const old = collect(T, ref); if (!old) return { err: 'این مورد پیدا نشد.' };
@@ -420,6 +496,7 @@
       const d = T.debts.find(x => x.id === old.mk.id);
       if (d && d.settles.length) { delete d.src; info.keptDebt = d.id; } else { T.debts = T.debts.filter(x => x.id !== old.mk.id); info.removedDebt = old.mk.id; }
     }
+    if (old.ml) { const l = T.loans.find(x => x.id === old.ml.id); if (l) { const r = dropLoanRecv(T, l, opts); info[r] = l.id; } }
     T.tx = T.tx.filter(x => !ids.has(x.id)); T.ops = T.ops.filter(x => !ids.has(x.id));
     const e = commit(state, T, before);
     if (e) return { err: 'با حذف این مورد، موجودی بعضی ثبت‌های بعدی منفی می‌شه. اول اون‌ها رو اصلاح کن.' };
@@ -450,5 +527,5 @@
   const feedOps = state => (state.ops || []).filter(o => !o.tx && o.type !== 'open');
 
   root.Flow = { KINDS, WHY, CASH, DEBT_NEW, DEBT_SETTLE, GIFT_CAT, WHY_NAME, place, placeName, places, inLedger, plainPath, held, valueAt,
-    bankFlow, syncBankTx, collect, read, save, remove, rowKind, feedOps, debtLeft, blank, settleQty };
+    bankFlow, syncBankTx, collect, read, save, remove, rowKind, feedOps, debtLeft, blank, settleQty, dropLoanRecv };
 })(typeof window !== 'undefined' ? window : globalThis);

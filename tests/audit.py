@@ -55,6 +55,7 @@ with sync_playwright() as p:
             pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
         pg.click('[data-tab=ob]'); pg.click('[data-act=obt][data-t=debt]'); pg.wait_for_timeout(250)
         pg.click('[data-act=newdebt][data-dir=owe] >> nth=-1'); pg.wait_for_timeout(450); pg.click('#dasset [data-a=gold]'); audit(pg, f'{scheme}:sheet-debt-form')
+        pg.click('#dmode [data-m=plan]'); pg.wait_for_timeout(200); audit(pg, f'{scheme}:sheet-debt-form-plan')
         pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
         pg.click('.card.debt:has-text("علی")'); pg.wait_for_timeout(450); audit(pg, f'{scheme}:sheet-debt-detail')
         pg.click('#settle'); pg.wait_for_timeout(700); audit(pg, f'{scheme}:sheet-debt-settle-form')
@@ -63,9 +64,12 @@ with sync_playwright() as p:
         L = pg.evaluate("window.__vault.state.locations[0].id")
         forms = [('out-asset', "{ kind: 'out', preset: { acc: '%s', asset: 'gold', q: 500 } }" % L), ('out-lend', "{ kind: 'out', why: 'lend' }"), ('out-repay', "{ kind: 'out', why: 'repay' }"),
                  ('in-collect', "{ kind: 'in', why: 'collect', preset: { debt: 'dg' } }"), ('in-gift', "{ kind: 'in', why: 'gift' }"), ('move', "{ type: 'transfer', preset: { acc: '%s', asset: 'gold', q: 100 } }" % L),
-                 ('conv', "{ type: 'conv', preset: { acc: '%s', asset: 'gold', q: 100, q2: 2000000 } }" % L)]
+                 ('conv', "{ type: 'conv', preset: { acc: '%s', asset: 'gold', q: 100, q2: 2000000 } }" % L),
+                 ('in-loan', "{ kind: 'in', why: 'loan' }"), ('in-borrow', "{ kind: 'in', why: 'borrow' }")]
         for n, o in forms:
             pg.evaluate(f"window.App.openTx({o})"); pg.wait_for_timeout(450); audit(pg, f'{scheme}:tx-{n}')
+            if n == 'in-borrow': pg.click('#tmode [data-m=plan]'); pg.wait_for_timeout(250); audit(pg, f'{scheme}:tx-borrow-plan')
+            if n == 'in-loan': pg.click('#lnunit [data-u=usdt]'); pg.wait_for_timeout(250); audit(pg, f'{scheme}:tx-loan-usdt')
             if n == 'out-asset': pg.evaluate("window.Flow.save(window.__vault.state, { kind: 'out', why: 'lend', person: 'تست', acc: '%s', asset: 'gold', q: 500 }, null, {}); window.App.save()" % L)
             pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
         pg.evaluate("window.Flow.save(window.__vault.state, { kind: 'conv', acc: '%s', asset: 'gold', q: 100, acc2: '%s', asset2: 'irr', q2: 20000000 }, null, {}); window.App.save(); window.App.render()" % (L, L))

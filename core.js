@@ -185,6 +185,15 @@
   }
 
   // ---------- تعهدات: اقساط و پرداخت‌های ماهانه ----------
+  // نسخه‌ی ۱۴: قسط وام می‌تونه به هر دارایی باشه (l.unit؛ نبودنش = ریال). جمع‌ها با قیمت امروز به ریال.
+  // نرخ (ریال برای هر واحد پایه‌ی دارایی) رو اپ با setRate می‌ده؛ بدون نرخ = ۰ (قیمت ثبت نشده).
+  let rateFn = () => null;
+  const setRate = fn => { rateFn = typeof fn === 'function' ? fn : () => null; };
+  const unitOf = l => l && l.unit && l.unit !== 'irr' ? l.unit : 'irr';
+  function loanAmt(l) {
+    const u = unitOf(l); if (u === 'irr') return l.amount;
+    const r = rateFn(u); return r ? Math.round(l.amount * r) : 0;
+  }
   function txAmountMap(state) { const m = new Map(); for (const t of state.tx) m.set(t.id, t.amount); return m; }
   // سررسید قسط i: وام بانکی = هر ماه همون روزِ قسط اول. خرید قسطی (restDay): قسط اول روز خرید، بقیه روز restDay ماه‌های بعد
   function loanDue(loan, i) {
@@ -207,7 +216,7 @@
       if (i < 0 || i >= l.count) continue;
       const info = l.paid && l.paid[i];
       list.push({ kind: 'loan', id: l.id, key: String(i), name: l.name, sub: `قسط ${faDigits(i + 1)} از ${faDigits(l.count)}`,
-        estimate: l.amount, amount: info ? paidAmount(info, l.amount) : l.amount, due: loanDue(l, i), paid: !!info, variable: false });
+        estimate: loanAmt(l), amount: info ? paidAmount(info, loanAmt(l)) : loanAmt(l), due: loanDue(l, i), paid: !!info, variable: false, unit: unitOf(l), qty: l.amount });
     }
     for (const f of state.fixed) {
       if (f.start && ymStr < f.start) continue;
@@ -300,7 +309,70 @@
     const remainingCount = Math.max(0, loan.count - paidCount);
     let next = null;
     for (let i = 0; i < loan.count; i++) if (!(loan.paid || {})[i]) { next = { i, due: loanDue(loan, i) }; break; }
-    return { paidCount, remainingCount, remainingAmount: remainingCount * loan.amount, last: loanDue(loan, loan.count - 1), next };
+    return { paidCount, remainingCount, remainingAmount: remainingCount * loanAmt(loan), remainingQty: remainingCount * loan.amount, last: loanDue(loan, loan.count - 1), next };
+  }
+
+  // ---------- برنامه‌ی بازپرداخت بدهی و طلب (نسخه‌ی ۱۴) ----------
+  // سه حالت: بدون موعد (none)، یک تاریخ (date: d.due) و قسطی (plan: d.plan = { amount /*هر قسط، واحد پایه‌ی دارایی*/, first }).
+  // قسطی منعطفه: هر پرداخت به قسطِ «پنجره»ی تاریخش می‌خوره (تا ۱۵ روز بعد از سررسید)؛ اگه اون قسط پر بود، به قسط بعدی.
+  // پرداخت بیشتر یا کمتر از قسط چیزی رو جلو نمی‌اندازه: اقساط بعدی از روی مانده دوباره ساخته می‌شن.
+  // وضعیت هر قسط: paid (کامل)، partial (پنجره بسته شد و کمتر پرداخت شد)، missed (پنجره بسته شد و هیچی)، late (سررسید گذشته، هنوز در پنجره)،
+  // due (سررسید نرسیده). paidQ = مقدار پرداخت‌شده در همون قسط.
+  const DEBT_GRACE = 15;
+  const debtPaidQ = d => (d.settles || []).reduce((s, x) => s + x.amount, 0);
+  const debtMode = d => d.plan && d.plan.amount > 0 && /^\d{4}\/\d{2}\/\d{2}$/.test(d.plan.first || '') ? 'plan' : d.due ? 'date' : 'none';
+  function debtSchedule(d, todayStr) {
+    const t = todayStr || today(), total = d.amount, paidAll = debtPaidQ(d), left = total - paidAll, mode = debtMode(d);
+    if (mode === 'none') return { mode, items: [], next: null, left };
+    if (mode === 'date') {
+      const it = { i: 0, due: d.due, amount: total, paidQ: paidAll, left: Math.max(0, left), status: left <= 0 ? 'paid' : t > d.due ? 'late' : 'due' };
+      return { mode, items: [it], next: left > 0 ? it : null, left };
+    }
+    const inst = d.plan.amount, first = d.plan.first, day = jParse(first).d;
+    const dueOf = k => addMonths(first, k, day), winEnd = k => addDays(dueOf(k), DEBT_GRACE);
+    const paid = [], before = k => { let s = 0; for (let j = 0; j < k; j++) s += paid[j] || 0; return s; };
+    const nominal = k => Math.min(inst, total - before(k));
+    const settles = (d.settles || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    let k = 0;
+    for (const s of settles) {
+      while (k < 600 && (s.date || '') > winEnd(k)) k++;
+      let j = k;
+      while (j < 600 && (paid[j] || 0) >= nominal(j) && nominal(j) > 0) j++;
+      paid[j] = (paid[j] || 0) + s.amount;
+    }
+    // قسط‌های بسته‌شده به اندازه‌ی پرداختشون از کل کم می‌کنن؛ قسط‌های باز و آینده به اندازه‌ی مبلغ برنامه (یا بیشتر اگه بیشتر پرداخت شده)
+    const items = []; let used = 0;
+    for (let i = 0; i < 600; i++) {
+      const rem = total - used; if (rem <= 0) break;
+      const nom = Math.min(inst, rem), pq = paid[i] || 0, due = dueOf(i);
+      const status = pq >= nom ? 'paid' : t > winEnd(i) ? (pq > 0 ? 'partial' : 'missed') : t > due ? 'late' : 'due';
+      items.push({ i, due, amount: nom, paidQ: pq, left: Math.max(0, nom - pq), status });
+      used += status === 'late' || status === 'due' ? Math.max(pq, nom) : pq;
+    }
+    const next = left > 0 ? items.find(x => x.status === 'late' || x.status === 'due') || null : null;
+    return { mode, items, next, left };
+  }
+  // ارزش ریالی یک تسویه: مبلغ تراکنشش، یا ارزش ثبت‌شده‌ی عملیات دارایی‌اش، وگرنه با قیمت امروز
+  function settleRial(state, d, s) {
+    if (s.txId) { const t = state.tx.find(x => x.id === s.txId); if (t) return t.amount || 0; }
+    if (s.opId) { const o = (state.ops || []).find(x => x.id === s.opId); if (o) { const v = o.value ?? o.cost; if (typeof v === 'number') return v; } }
+    if (!d.asset || d.asset === 'irr') return s.amount;
+    const r = rateFn(d.asset); return r ? Math.round(s.amount * r) : 0;
+  }
+  // پرداخت‌ها و دریافت‌های بدهی و طلبِ قسطی یا تاریخ‌دار در یک ماه (برای «بالانس بدهی و طلب» کارت جریان نقدی).
+  // بدهی بی‌تاریخ در آمار ماه نیست؛ پرداخت‌های قبل از برنامه‌دار شدن (d.sched) هم حساب نمی‌شن.
+  function debtFlow(state, ymStr, todayStr) {
+    let din = 0, dout = 0;
+    for (const d of state.debts || []) {
+      if (debtMode(d) === 'none') continue;
+      const from = d.sched || d.date || '';
+      for (const s of d.settles || []) {
+        if (!s.date || ym(s.date) !== ymStr || s.date < from || (todayStr && s.date > todayStr)) continue;
+        const v = settleRial(state, d, s);
+        if (d.dir === 'owe') dout += v; else din += v;
+      }
+    }
+    return { in: din, out: dout, bal: din - dout };
   }
 
   // ---------- شاخص‌ها (KPI) و داده‌ی نمودارها ----------
@@ -340,8 +412,18 @@
     const assumed = due.reduce((s, i) => s + i.amount, 0);
     const pending = inc.filter(i => !i.paid && !(todayStr && i.due <= todayStr)).reduce((s, i) => s + i.amount, 0);
     const tin = got + assumed + other, out = loans + bills + daily, net = tin - out;
-    const loanIn = state.tx.filter(t => t.loanRecv && ym(t.date) === ymStr && (!todayStr || t.date <= todayStr)).reduce((s, t) => s + (t.amount || 0), 0);
-    return { in: tin, out, loans, bills, daily, net, loanIn, rate: tin > 0 ? net / tin : null, assumed, assumedNames: due.map(i => i.name), pending };
+    const loanIn = (state.loans || []).filter(l => l.recv && l.recv.date && ym(l.recv.date) === ymStr && (!todayStr || l.recv.date <= todayStr))
+      .reduce((s, l) => s + loanRecvRial(state, l), 0);
+    const df = debtFlow(state, ymStr, todayStr), net2 = net + df.bal;
+    return { in: tin, out, loans, bills, daily, net: net2, loanIn, debtIn: df.in, debtOut: df.out, debtBal: df.bal, rate: tin > 0 ? net2 / tin : null, assumed, assumedNames: due.map(i => i.name), pending };
+  }
+  // ارزش ریالی دریافت وام (تراکنش یا عملیات دارایی‌اش)
+  function loanRecvRial(state, l) {
+    const r = l.recv; if (!r) return 0;
+    if (r.txId) { const t = state.tx.find(x => x.id === r.txId); if (t) return t.amount || 0; }
+    if (r.opId) { const o = (state.ops || []).find(x => x.id === r.opId); if (o && typeof o.cost === 'number') return o.cost; }
+    if (!r.asset || r.asset === 'irr') return r.amount || 0;
+    const k = rateFn(r.asset); return k ? Math.round(r.amount * k) : 0;
   }
   function categoryTotals(state, ymStr) {
     const m = {};
@@ -365,7 +447,7 @@
     const pts = [{ ym: curYm, now: true, total: state.loans.reduce((s, l) => s + loanSummary(l).remainingAmount, 0) }];
     for (let k = 0; k < maxMonths; k++) {
       const m = addYm(curYm, k);
-      const total = state.loans.reduce((s, l) => s + unpaidAfter(l, m) * l.amount, 0);
+      const total = state.loans.reduce((s, l) => s + unpaidAfter(l, m) * loanAmt(l), 0);
       pts.push({ ym: m, total });
       if (!total) break;
     }
@@ -391,7 +473,7 @@
     for (const l of state.loans) {
       const s = loanSummary(l); if (!s.remainingCount) continue;
       const last = ym(s.last);
-      if (last >= curYm && last <= lim) { amount += l.amount; loans.push(l.name); }
+      if (last >= curYm && last <= lim) { amount += loanAmt(l); loans.push(l.name); }
     }
     return { amount, loans };
   }
@@ -444,7 +526,7 @@
       loanShare: out.total ? out.loans / out.total : null,
       income, hasIncome: income > 0,
       dti: income ? loanOb / income : null,
-      savingsRate: income ? (income - cf.out) / income : null, cashOut: cf.out
+      savingsRate: income ? (income - cf.out + cf.debtBal) / income : null, cashOut: cf.out
     };
   }
 
@@ -553,6 +635,7 @@
   root.Core = { toJ, toG, today, ym, addMonths, addYm, addDays, diffDays, monthLen, jParse, jStr, pad,
     MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomeMatches, incomesForMonth, openObligations, monthStats, loanDue, loanSummary,
     ymIndex, monthOutflow, cashFlow, txAccountDelta, afterAnchor, accountBalance, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis,
+    setRate, loanAmt, unitOf, debtMode, debtSchedule, debtFlow, settleRial, loanRecvRial, DEBT_GRACE,
     creditOpen, creditUsed, creditStatements, creditOpenMonths, creditSettleSet, migrateCredit };
   root.J = root.Core;
 })(typeof window !== 'undefined' ? window : globalThis);

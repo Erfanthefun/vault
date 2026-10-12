@@ -73,7 +73,7 @@ with sync_playwright() as p:
 
     # ۳) قرض دادن تتر به دوست
     hub('add', '[data-type=expense]'); why('lend')
-    check('lend: person field + due', pg.is_visible('#tperson') and pg.is_visible('#thasdue'))
+    check('lend: person field + due', pg.is_visible('#tperson') and pg.is_visible('#tmode'))
     pg.fill('#tperson', 'امیر'); pg.select_option('#acc', 'WX'); asset('usdt'); pg.fill('.sheet [name=amount]', '20'); wait(200)
     check('lend: summary says a receivable is made', 'طلبکار از امیر' in pg.inner_text('#tsum'), pg.inner_text('#tsum'))
     pg.click('#savetx'); closed()
