@@ -30,7 +30,9 @@ with sync_playwright() as p:
           s.accounts.find(a => a.name === 'بلوبانک').balance = 500000000;
           s.incomes.push({ id: 'i1', name: 'حقوق', amount: 300000000, day: 25, start: Core.ym(J.today()), end: null, paid: {}, cat: 'حقوق' });
           s.debts.push({ id: 'dg', dir: 'owed', person: 'علی', asset: 'gold', amount: 5000, date: J.today(), due: null, note: '', settles: [{ amount: 2000, date: J.today() }] },
-            { id: 'db', dir: 'owe', person: 'سارا', asset: 'btc', amount: 1000000, date: J.today(), due: null, note: '', settles: [] });
+            { id: 'db', dir: 'owe', person: 'سارا', asset: 'btc', amount: 1000000, date: J.today(), due: null, note: '', settles: [] },
+            { id: 'db2', dir: 'owe', person: 'سارا', asset: 'irr', amount: 20000000, date: J.today(), due: null, note: '', settles: [] },
+            { id: 'db3', dir: 'owe', person: 'مامان', asset: 'irr', amount: 50000000, date: J.today(), due: null, note: '', settles: [] });
           localStorage.setItem('vault-v1', JSON.stringify(s)); })()"""); pg.reload(); pg.wait_for_timeout(500)
         views = [('home', lambda: pg.click('[data-tab=home]')), ('tx', lambda: pg.click('[data-tab=tx]')),
                  ('plan-income', lambda: (pg.click('[data-tab=ob]'), pg.click('[data-act=obt][data-t=income]'))),
@@ -59,6 +61,9 @@ with sync_playwright() as p:
         pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
         pg.click('.card.debt:has-text("علی")'); pg.wait_for_timeout(450); audit(pg, f'{scheme}:sheet-debt-detail')
         pg.click('#settle'); pg.wait_for_timeout(700); audit(pg, f'{scheme}:sheet-debt-settle-form')
+        pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
+        # نسخه‌ی ۱۵: برگه‌ی یک نفر (چند مورد)
+        pg.click('.card.debt:has-text("سارا")'); pg.wait_for_timeout(450); audit(pg, f'{scheme}:sheet-debt-person')
         pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
         # نسخه‌ی ۱۲: فرم یکپارچه در همه‌ی حالت‌ها + فهرست تراکنش‌ها با ردیف‌های دارایی
         L = pg.evaluate("window.__vault.state.locations[0].id")

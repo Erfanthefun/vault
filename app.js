@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۱۴';
+  const VERSION = '۱۵٫۱';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -561,7 +561,7 @@
     <section class="block">
       <div class="block-head"><h2>پیش رو در ${monthName(cur)}</h2>${unpaidList.length ? `<span class="count">${faDigits(unpaidList.length)} مورد</span>` : ''}</div>
       ${unpaidList.length ? `<ul class="oblist">${unpaidList.map(obRow).join('')}</ul>` :
-        `<p class="empty">${st.count || st.inc.length || paidList.length ? 'همه‌ی پرداخت‌ها و دریافت‌های این ماه انجام شده.' : 'هنوز قسط، قبض یا درآمد ثابتی ثبت نشده. از تب «برنامه» اضافه‌شون کن تا سررسیدها اینجا بیان.'} ${st.count || st.inc.length || paidList.length ? '' : `<button class="linkbtn" data-act="goob">برنامه</button>`}</p>`}
+        `<p class="empty">${st.count || st.inc.length || paidList.length ? 'همه‌ی پرداخت‌ها و دریافت‌های این ماه انجام شده.' : 'هنوز قسط، قبض یا درآمد ثابتی ثبت نشده. از تب «تعهدات» اضافه‌شون کن تا سررسیدها اینجا بیان.'} ${st.count || st.inc.length || paidList.length ? '' : `<button class="linkbtn" data-act="goob">تعهدات</button>`}</p>`}
       ${paidList.length ? `<details class="fold" ${foldAttr('homePaid')}><summary>${IC.down}انجام‌شده‌ها (${faDigits(paidList.length)})</summary><ul class="oblist">${paidList.map(obRow).join('')}</ul></details>` : ''}
     </section>
     <section class="block">
@@ -747,9 +747,9 @@
     } else if (obTab === 'income') body = incomeList();
     else body = debtList();
     return `
-    <header class="top home-top"><h1>برنامه</h1>${headerTools()}</header>
+    <header class="top home-top"><h1>تعهدات</h1>${headerTools()}</header>
     ${obTab === 'loan' || obTab === 'fixed' ? `<div class="sums"><div class="sum"><span>تعهد ${monthName(cur)}</span><b>${money(monthly)}</b></div><div class="sum"><span>کل مانده‌ی وام‌ها</span><b>${money(totalDebt)}</b></div></div>` : ''}
-    <div class="chips seg" role="group" aria-label="بخش‌های برنامه">${[['income', 'درآمد ثابت'], ['loan', 'اقساط'], ['fixed', 'قبض‌ها'], ['debt', 'بدهی و طلب']].map(([k, n]) =>
+    <div class="chips seg" role="group" aria-label="بخش‌های تعهدات">${[['income', 'درآمد ثابت'], ['loan', 'اقساط'], ['fixed', 'قبض‌ها'], ['debt', 'بدهی و طلب']].map(([k, n]) =>
       `<button class="chip ${obTab === k ? 'on' : ''}" data-act="obt" data-t="${k}" aria-pressed="${obTab === k}">${n}</button>`).join('')}</div>
     ${body}`;
   }
@@ -831,9 +831,9 @@
         ${tile('add', IC.swap, 'انتقال بین حساب‌ها', 'data-type="transfer"')}${tile('add', IC.conv, 'تبدیل (مثلاً تتر به ریال)', 'data-type="conv"')}
         ${tile('paste', IC.paste, 'چسباندن پیامک یا قیمت', 'data-wide="1"')}</div>
       <p class="note hubnote">برداشت و واریز با هر دارایی (تومان، تتر، طلا، …) از هر حساب یا صرافی؛ برای قرض دادن، قرض گرفتن و تسویه‌ی بدهی و طلب هم.</p>
-      <h3 class="grp">برنامه</h3><div class="hubgrid">
+      <h3 class="grp">تعهدات</h3><div class="hubgrid">
         ${tile('duelist', IC.check, 'پرداخت قسط یا قبض')}${tile('newincome', IC.salary, 'درآمد ثابت (حقوق)')}
-        ${tile('newloan', IC.cal, 'وام یا خرید قسطی')}${tile('newfixed', IC.cal, 'قبض ماهانه')}${tile('newdebt', IC.swap, 'بدهی یا طلب', 'data-dir="owe"')}${tile('goob', IC.chart, 'دیدن همه‌ی برنامه')}</div>
+        ${tile('newloan', IC.cal, 'وام یا خرید قسطی')}${tile('newfixed', IC.cal, 'قبض ماهانه')}${tile('newdebt', IC.swap, 'بدهی یا طلب', 'data-dir="owe"')}${tile('goob', IC.chart, 'دیدن همه‌ی تعهدات')}</div>
       ${inv ? `<h3 class="grp">دارایی</h3><div class="hubgrid">
         ${tile('op', IC.in, 'خرید دارایی', 'data-type="buy"')}${tile('op', IC.out, 'فروش دارایی', 'data-type="sell"')}
         ${tile('addx', IC.gift, 'هدیه گرفتم', 'data-kind="in" data-why="gift"')}${tile('prices', IC.chart, 'به‌روزرسانی قیمت‌ها')}${tile('xbank', IC.swap, 'صرافی ↔ بانک')}${tile('opchooser', IC.plus, 'عملیات دیگه')}</div>` : ''}`;
@@ -843,23 +843,87 @@
     });
   }
 
-  function debtList() {
-    const { owe, owed, unpriced } = debtTotals();
-    const open = openDebts().sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
-    const done = S.debts.filter(d => debtLeft(d) <= 0).sort((a, b) => (b.closed || '').localeCompare(a.closed || ''));
-    const card = d => {
-      const left = debtLeft(d), paid = d.amount - left;
-      return `<li><button class="card debt ${d.dir}" data-act="debtd" data-id="${esc(d.id)}">
-        <div class="lc-top"><strong>${esc(debtTitle(d))}</strong><span>${left > 0 ? debtWhen(d) : 'تسویه شد'}</span></div>
+  // ---------- بدهی و طلب به تفکیک اشخاص (نسخه‌ی ۱۵) ----------
+  const personKey = p => String(p || '').replace(/[يى]/g, 'ی').replace(/ك/g, 'ک').replace(/\s+/g, ' ').trim();
+  // inPerson: داخل برگه‌ی یک نفر، به‌جای «بدهکار به …» تاریخ ثبت عنوان کارته
+  function debtCard(d, inPerson) {
+    const left = debtLeft(d), paid = d.amount - left;
+    return `<li><button class="card debt ${d.dir}" data-act="debtd" data-id="${esc(d.id)}">
+        <div class="lc-top"><strong>${inPerson ? 'از ' + dateTitle(d.date) : esc(debtTitle(d))}</strong><span>${left > 0 ? debtWhen(d) : 'تسویه شد'}</span></div>
         <div class="fx-row"><b class="${left > 0 ? (d.dir === 'owe' ? 'neg' : 'pos') : ''}">${debtShow(d, left > 0 ? left : d.amount)}</b>${paid > 0 && left > 0 ? `<em>${esc(debtQty(d, paid, false))} از ${esc(debtQty(d, d.amount))} تسویه شده</em>` : ''}</div>
         ${d.note ? `<p class="lc-end">${esc(d.note)}</p>` : ''}
       </button></li>`;
+  }
+  // مانده‌های باز هر نفر در یک جهت (owe/owed): جمع تومانی با قیمت امروز + تفکیک واحدها
+  function debtPeople(dir) {
+    const map = new Map();
+    for (const d of openDebts()) {
+      if (d.dir !== dir) continue;
+      const k = personKey(d.person); if (!k) continue;
+      if (!map.has(k)) map.set(k, { name: k, debts: [], total: 0, unpriced: 0, units: {} });
+      const g = map.get(k), q = debtLeft(d), v = debtVal(d, q), a = dAsset(d);
+      g.debts.push(d); g.units[a] = (g.units[a] || 0) + q;
+      if (v === null) g.unpriced++; else g.total += v;
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'fa'));
+  }
+  // «۲۰۰ میلیون تومان + ۵۰ دلار»؛ تومانی همیشه اول
+  const unitsTxt = units => Object.keys(units).sort((a, b) => (a === 'irr' ? -1 : b === 'irr' ? 1 : 0)).map(a => debtQty({ asset: a }, units[a])).join(' + ');
+  const unitsMixed = g => Object.keys(g.units).length > 1 || !g.units.irr;
+  // موعد نزدیک‌ترِ یک نفر (برای خلاصه‌ی کارت)
+  function personWhen(g) {
+    if (g.debts.length === 1) return debtWhen(g.debts[0]);
+    let best = null;
+    for (const d of g.debts) { const n = C.debtSchedule(d, today()).next; if (n && (!best || n.due < best.n.due)) best = { d, n }; }
+    return `${faDigits(g.debts.length)} مورد${best ? '، ' + debtWhen(best.d) : ''}`;
+  }
+  function personCard(g, dir) {
+    const one = g.debts.length === 1 ? g.debts[0] : null, paid = one ? one.amount - debtLeft(one) : 0;
+    const prog = paid > 0 ? `<em>${esc(debtQty(one, paid, false))} از ${esc(debtQty(one, one.amount))} تسویه شده</em>` : g.unpriced && g.total ? '<em>بخشی بدون قیمت</em>' : '';
+    return `<li><button class="card debt ${dir}" data-act="debtp" data-dir="${dir}" data-p="${esc(g.name)}">
+        <div class="lc-top"><strong>${esc(g.name)}</strong><span>${personWhen(g)}</span></div>
+        <div class="fx-row"><b class="${dir === 'owe' ? 'neg' : 'pos'}">${g.total || !g.unpriced ? money(g.total) : 'بدون قیمت'}</b>${prog}</div>
+        ${unitsMixed(g) ? `<p class="lc-end">${esc(unitsTxt(g.units))}</p>` : ''}
+      </button></li>`;
+  }
+  function peopleChart(list, dir) {
+    if (list.length < 2) return '';
+    const max = Math.max(...list.map(g => g.total)) || 1, sum = list.reduce((s, g) => s + g.total, 0) || 1;
+    return `<section class="card-block chart pchart"><h3>${dir === 'owe' ? 'سهم هر نفر از بدهی‌ها' : 'سهم هر نفر از طلب‌ها'}</h3><ul class="catbars">${list.map(g =>
+      `<li><div><span>${esc(g.name)}</span><b>${shortMoney(g.total)} <small>${pct(g.total / sum)}</small></b></div><i style="width:${Math.max(2, g.total / max * 100)}%"></i></li>`).join('')}</ul></section>`;
+  }
+  function debtList() {
+    const { owe, owed, unpriced } = debtTotals();
+    const done = S.debts.filter(d => debtLeft(d) <= 0).sort((a, b) => (b.closed || '').localeCompare(a.closed || ''));
+    const sec = (dir, title) => {
+      const list = debtPeople(dir); if (!list.length) return '';
+      return `<h2 class="subh dsec">${title}</h2>${peopleChart(list, dir)}<ul class="cards">${list.map(g => personCard(g, dir)).join('')}</ul>`;
     };
+    const body = sec('owe', 'بدهکارم به…') + sec('owed', 'طلبکارم از…');
     return `<div class="sums"><div class="sum"><span>بدهی من</span><b class="neg">${money(owe)}</b></div><div class="sum"><span>طلب من</span><b class="pos">${money(owed)}</b></div></div>
       ${S.debts.some(d => dAsset(d) !== 'irr' && debtLeft(d) > 0) ? `<p class="note">طلا، دلار و بقیه‌ی دارایی‌ها با قیمت امروز به تومان حساب شده‌ن.${unpriced ? ` ${faDigits(unpriced)} مورد هنوز قیمت نداره و در جمع نیست.` : ''}</p>` : ''}
-      ${open.length ? `<ul class="cards">${open.map(card).join('')}</ul>` : `<p class="empty">بدهی یا طلب بازی نداری.</p>`}
-      ${done.length ? `<details class="fold" ${foldAttr('debtsDone')}><summary>${IC.down}تسویه‌شده‌ها (${faDigits(done.length)})</summary><ul class="cards">${done.map(card).join('')}</ul></details>` : ''}
+      ${body || `<p class="empty">بدهی یا طلب بازی نداری.</p>`}
+      ${done.length ? `<details class="fold" ${foldAttr('debtsDone')}><summary>${IC.down}تسویه‌شده‌ها (${faDigits(done.length)})</summary><ul class="cards">${done.map(d => debtCard(d)).join('')}</ul></details>` : ''}
       <div class="btnrow"><button class="btn wide" data-act="newdebt" data-dir="owe">بدهکارم به…</button><button class="btn wide ghost" data-act="newdebt" data-dir="owed">طلبکارم از…</button></div>`;
+  }
+  // برگه‌ی یک نفر: همه‌ی بدهی‌ها (یا طلب‌های) بازش، تسویه‌شده‌هاش و ثبت مورد تازه برای همون نفر
+  function openDebtPerson(dir, name) {
+    const g = debtPeople(dir).find(x => x.name === name);
+    const done = S.debts.filter(d => d.dir === dir && personKey(d.person) === name && debtLeft(d) <= 0);
+    if (!g && !done.length) { render(); return; }
+    // فقط یک مورد (بدون سابقه‌ی تسویه‌شده): مستقیم جزئیات همون مورد
+    if (g && g.debts.length === 1 && !done.length) { openDebtDetail(g.debts[0].id); return; }
+    const title = (dir === 'owe' ? 'بدهکار به ' : 'طلبکار از ') + name;
+    const html = `
+      ${g ? `<div class="sums"><div class="sum"><span>جمع مانده</span><b class="${dir === 'owe' ? 'neg' : 'pos'}">${g.total || !g.unpriced ? money(g.total) : 'بدون قیمت'}</b></div><div class="sum"><span>موارد باز</span><b>${faDigits(g.debts.length)}</b></div></div>
+      ${unitsMixed(g) ? `<p class="note">به تفکیک واحد: ${esc(unitsTxt(g.units))}${g.unpriced ? `. ${faDigits(g.unpriced)} مورد هنوز قیمت نداره و در جمع نیست` : ''}.</p>` : ''}
+      <ul class="cards">${g.debts.map(d => debtCard(d, true)).join('')}</ul>` : '<p class="empty">مورد بازی نمونده.</p>'}
+      ${done.length ? `<details class="fold"><summary>${IC.down}تسویه‌شده‌ها (${faDigits(done.length)})</summary><ul class="cards">${done.map(d => debtCard(d, true)).join('')}</ul></details>` : ''}
+      <button class="btn wide ghost" data-act="newdebt" data-dir="${dir}" data-p="${esc(name)}">${IC.plus}${dir === 'owe' ? 'بدهی تازه به ' : 'طلب تازه از '}${esc(name)}</button>`;
+    openSheet(title, html, ov => {
+      // هر انتخاب: اول این برگه بسته می‌شه، بعد برگه‌ی مربوط باز می‌شه
+      $('.sheet-body', ov).addEventListener('click', e => { if (e.target.closest('[data-act]')) closeSheet(ov); });
+    });
   }
 
   // ---------- نمودارها (SVG دست‌ساز؛ زمان از راست به چپ) ----------
@@ -1312,13 +1376,13 @@
       if (E.why === 'repay' || E.why === 'collect') {
         const dir = E.why === 'repay' ? 'owe' : 'owed';
         const list = S.debts.filter(d => d.dir === dir && (debtLeft(d) > 0 || d.id === E.debt));
-        if (!list.length) return `<p class="alert">${dir === 'owe' ? 'بدهی بازی ثبت نشده.' : 'طلب بازی ثبت نشده.'} از «برنامه › بدهی و طلب» اضافه‌ش کن.</p>`;
+        if (!list.length) return `<p class="alert">${dir === 'owe' ? 'بدهی بازی ثبت نشده.' : 'طلب بازی ثبت نشده.'} از «تعهدات › بدهی و طلب» اضافه‌ش کن.</p>`;
         return `<label class="lbl" for="tdebt">${dir === 'owe' ? 'کدوم بدهی؟' : 'کدوم طلب؟'}</label><select id="tdebt"><option value="">— انتخاب کن —</option>${list.map(d =>
           `<option value="${esc(d.id)}" ${d.id === E.debt ? 'selected' : ''}>${esc(d.person)}، مانده ${esc(debtQty(d, Math.max(0, debtLeft(d))))}</option>`).join('')}</select>`;
       }
       return '';
     }
-    // واریز › وام: فیلدهای اقساط (وام در «برنامه › اقساط» ساخته یا به‌روز می‌شه)
+    // واریز › وام: فیلدهای اقساط (وام در «تعهدات › اقساط» ساخته یا به‌روز می‌شه)
     const LOAN_UNITS = TX_ASSETS.filter(a => a !== 'bar');
     function loanBlock() {
       if (!E.loan) E.loan = { name: '', lender: '', unit: LOAN_UNITS.includes(E.asset) ? E.asset : 'irr', amount: 0, count: 0, first: C.addMonths(E.date || today(), 1), cat: 'وام', paidCount: 0 };
@@ -1340,7 +1404,7 @@
       const kindNote = { move: 'جابه‌جایی بین حساب‌های خودت (هر دارایی‌ای)؛ در درآمد و خرج حساب نمی‌شه.', conv: 'مثلاً فروش تتر در والکس و واریز پولش به بلو، یا خرید طلا با ریالِ صرافی؛ در یک ثبت. در درآمد و خرج حساب نمی‌شه.' }[E.kind];
       const whyNote = E.why === 'gift' ? `در «${E.kind === 'out' ? 'رفت' : 'آمد'}» ماه با دسته‌ی «${Flow.GIFT_CAT[E.kind]}» حساب می‌شه.` : E.why === 'lend' || E.why === 'borrow' ? `یه «${E.why === 'lend' ? 'طلب' : 'بدهی'}» به همین دارایی ساخته می‌شه؛ در درآمد و خرج حساب نمی‌شه.`
         : E.why === 'repay' || E.why === 'collect' ? 'از مانده‌ی همون مورد کم می‌شه؛ در «آمد» و «رفت» ماه نیست (اگه قسطی یا تاریخ‌دار باشه، در «بالانس بدهی و طلب» میاد).'
-        : E.why === 'loan' ? 'به موجودی همین حساب اضافه می‌شه ولی در «آمد» ماه حساب نمی‌شه. وامش با اقساطش در «برنامه › اقساط» ساخته می‌شه.' : '';
+        : E.why === 'loan' ? 'به موجودی همین حساب اضافه می‌شه ولی در «آمد» ماه حساب نمی‌شه. وامش با اقساطش در «تعهدات › اقساط» ساخته می‌شه.' : '';
       return `
       ${p.sms ? `<p class="smsinfo">از پیامک ${esc(p.bank)}${p.balance != null ? `، مانده ${money(p.balance)}` : ''}</p>` : ''}
       ${dupe ? `<p class="alert">یه تراکنش با همین مبلغ و زمان قبلاً ثبت شده. احتمالاً این پیامک تکراریه.</p>` : ''}
@@ -1544,7 +1608,7 @@
           if (bk) S.settings.lastBank = bk.id;
           done = true; save(); closeSheet(ov); refreshSheets(); render();
           const extra = r.info.debt && r.info.debt.made ? ` «${r.info.debt.dir === 'owed' ? 'طلبکار از' : 'بدهکار به'} ${r.info.debt.person}» ساخته شد.`
-            : r.info.loan ? (r.info.loan.made ? ` وام «${r.info.loan.name}» با اقساطش در «برنامه › اقساط» ساخته شد.` : ` وام «${r.info.loan.name}» به‌روز شد.`)
+            : r.info.loan ? (r.info.loan.made ? ` وام «${r.info.loan.name}» با اقساطش در «تعهدات › اقساط» ساخته شد.` : ` وام «${r.info.loan.name}» به‌روز شد.`)
             : r.info.removedLoan ? ' وامی که با این واریز ساخته شده بود حذف شد.'
             : r.info.settle ? ` ${r.info.settle.left > 0 ? 'از مانده کم شد' : 'تسویه شد'}${r.info.settle.over ? ' (بیشتر از مانده بود)' : ''}.` : r.info.keptDebt ? ' بدهی/طلبی که ساخته بود چون تسویه داره، باقی موند.' : '';
           toast((edit ? 'تغییرات ذخیره شد.' : 'ثبت شد.') + extra + (bk ? ` موجودی ${bk.name} هم به‌روز شد.` : ''));
@@ -1982,7 +2046,7 @@
     return upd;
   }
 
-  function openDebtForm(id, dir) {
+  function openDebtForm(id, dir, person) {
     const d = id ? S.debts.find(x => x.id === id) : null;
     dir = d ? d.dir : dir || 'owe';
     let asset = d ? dAsset(d) : 'irr';
@@ -1991,7 +2055,7 @@
     const people = [...new Set(S.debts.map(x => x.person))];
     const html = `
       <div class="chips seg" id="ddir" role="group">${[['owe', 'بدهکارم به'], ['owed', 'طلبکارم از']].map(([k, n]) => `<button type="button" class="chip ${dir === k ? 'on' : ''}" data-d="${k}" aria-pressed="${dir === k}" ${locked ? 'disabled' : ''}>${n}</button>`).join('')}</div>
-      <label class="lbl" for="dperson">شخص</label><input id="dperson" list="dpeople" value="${esc(d ? d.person : '')}" placeholder="نام">
+      <label class="lbl" for="dperson">شخص</label><input id="dperson" list="dpeople" value="${esc(d ? d.person : person || '')}" placeholder="نام">
       <datalist id="dpeople">${people.map(p => `<option value="${esc(p)}">`).join('')}</datalist>
       <label class="lbl">به چه واحدی؟</label>
       <div class="chips seg wrap" id="dasset" role="group" aria-label="واحد بدهی یا طلب">${(window.Inv ? window.Inv.DEBT_ASSETS : ['irr']).map(a => `<button type="button" class="chip ${asset === a ? 'on' : ''}" data-a="${a}" aria-pressed="${asset === a}" ${locked ? 'disabled' : ''}>${esc(window.Inv ? window.Inv.debtAssetName(a) : 'تومان')}</button>`).join('')}</div>
@@ -2015,7 +2079,7 @@
         $$('#dasset .chip', ov).forEach(c => { c.classList.toggle('on', c === b); c.setAttribute('aria-pressed', c === b); });
         $('#dirr', ov).hidden = asset !== 'irr'; $('#dqw', ov).hidden = asset === 'irr';
         if (asset !== 'irr') $('#dqlbl', ov).textContent = `مقدار (${window.Inv.faUnit(asset)})`; });
-      if (!d) setTimeout(() => { const i = $('#dperson', ov); if (i) i.focus(); }, 300);
+      if (!d && !person) setTimeout(() => { const i = $('#dperson', ov); if (i) i.focus(); }, 300);
       once($('#dsave', ov), () => {
         const person = $('#dperson', ov).value.trim();
         const amount = locked ? d.amount : asset === 'irr' ? readAmount(ov, 'damount') : V.parseQty($('#dqty', ov).value, asset);
@@ -2341,7 +2405,7 @@
       txf: () => { txFilter = b.dataset.f; render(); }, obt: () => { obTab = b.dataset.t; render(); },
       newloan: () => openLoanForm(), newfixed: () => openFixedForm(),
       loan: () => openLoanDetail(id), fixed: () => openFixedForm(id),
-      newdebt: () => openDebtForm(null, b.dataset.dir), debtd: () => openDebtDetail(id),
+      newdebt: () => openDebtForm(null, b.dataset.dir, b.dataset.p), debtd: () => openDebtDetail(id), debtp: () => openDebtPerson(b.dataset.dir, b.dataset.p),
       excel: exportExcel, ics: exportICS, cal: sendToCalendar, backup, goset: () => go('set'),
       savebnpl: () => { const v = readInt($('#bnplday')); if (!(v >= 1 && v <= 31)) { toast('روز باید بین ۱ تا ۳۱ باشه.', 'bad'); return; } S.settings.bnplDay = v; save(); toast('ذخیره شد.'); },
       back: () => { if (history.state && history.state.tab && history.length > 1) history.back(); else go(prevTab); },

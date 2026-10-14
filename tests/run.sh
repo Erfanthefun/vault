@@ -21,7 +21,8 @@ python3 tests/e2e_credit.py; R=$?
 python3 tests/e2e_v12.py; W=$?
 python3 tests/e2e_loanrecv.py; N=$?
 python3 tests/e2e_v14.py; F=$?
+python3 tests/e2e_v15.py; G=$?
 # مقایسه با نسخه‌ی قبل: اگه نسخه‌ی قبلی روی پورت ۸۷۶۸ در دسترس باشه (OLD_VERSION=۱۳ برای نسخه‌ی ۱۳)
 M=0; if curl -s -o /dev/null http://localhost:8768/index.html; then python3 tests/e2e_migrate.py; M=$?; fi
 python3 tests/audit.py; X=$?
-kill $SRV; exit $(( A || B || U || P || D || L || I || K || R || W || N || F || M || X ))
+kill $SRV; exit $(( A || B || U || P || D || L || I || K || R || W || N || F || G || M || X ))

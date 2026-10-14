@@ -826,7 +826,7 @@
     prices: () => openPrices(), locs: openLocs, opchooser: openChooser, goal: b => openGoal(b.dataset.id),
     op: b => openOpForm(b.dataset.type), xbank: openXBank, editop: b => { const o = S.ops.find(x => x.id === b.dataset.id);
       if (o && o.via) { App.openTx({ op: o.id }); return; }
-      if (o && o.debt) { toast('این عملیات از تسویه‌ی بدهی و طلب ساخته شده؛ از همون‌جا (برنامه › بدهی و طلب) حذفش کن.'); return; }
+      if (o && o.debt) { toast('این عملیات از تسویه‌ی بدهی و طلب ساخته شده؛ از همون‌جا (تعهدات › بدهی و طلب) حذفش کن.'); return; }
       if (o && o.type === 'salary') { openSalary({ opId: o.id }); return; }
       openOpForm(null, b.dataset.id); }, opf: b => { opFilter = b.dataset.f; render(); },
     asset: b => openAssetDetail(b.dataset.a), loc: b => openLocDetail(b.dataset.id),

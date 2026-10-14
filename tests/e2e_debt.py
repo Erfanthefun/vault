@@ -51,7 +51,7 @@ with sync_playwright() as p:
 
     # ۲) نمایش و جمع‌ها با ارزش امروز
     card = pg.inner_text('.card.debt:has-text("علی")')
-    check('list: shows grams and ≈ toman value', '۵ گرم' in card and '≈' in card and '۱۲۲٬۰۰۶٬۰۰۰' in card, card)
+    check('list (v15 person card): toman total + grams breakdown', '۵ گرم' in card and '۱۲۲٬۰۰۶٬۰۰۰' in card, card)
     check('list: note about valuation by today price', 'قیمت امروز' in pg.inner_text('#view'))
     check('totals: receivable valued at today price (rial)', pg.evaluate('App.debtTotals().owed') == 5 * 244012000)
     pg.click('[data-tab=home]'); wait(200)

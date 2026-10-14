@@ -28,13 +28,13 @@ with sync_playwright() as p:
     pg.click('[data-tab=ob]'); wait(100); pg.click('.hdr-tools [data-tab=rep]'); wait()
     check('nav: report opens with back button', 'گزارش' in pg.inner_text('h1') and pg.query_selector('[data-act=back]') is not None)
     pg.click('[data-act=back]'); wait()
-    check('nav: back returns to previous tab (برنامه)', 'برنامه' in pg.inner_text('h1'), pg.inner_text('h1'))
+    check('nav: back returns to previous tab (تعهدات)', 'تعهدات' in pg.inner_text('h1'), pg.inner_text('h1'))
     pg.click('.hdr-tools [data-act=goset]'); wait(); pg.go_back(); wait()
-    check('nav: browser/system back works too', 'برنامه' in pg.inner_text('h1'), pg.inner_text('h1'))
+    check('nav: browser/system back works too', 'تعهدات' in pg.inner_text('h1'), pg.inner_text('h1'))
 
     # ۲) مرکز ثبت
     pg.click('.tabbar .addbtn'); wait()
-    check('hub: three groups', [x.inner_text() for x in pg.query_selector_all('.sheet .grp')] == ['پول روزانه', 'برنامه', 'دارایی'])
+    check('hub: three groups', [x.inner_text() for x in pg.query_selector_all('.sheet .grp')] == ['پول روزانه', 'تعهدات', 'دارایی'])
     check('hub: ≥14 actions, all ≥44px tall', len(pg.query_selector_all('.hubtile')) >= 14 and all(t.bounding_box()['height'] >= 44 for t in pg.query_selector_all('.hubtile')))
     pg.click('.hubtile[data-act=add][data-type=expense]'); wait(500)
     check('hub: tile closes hub and opens the form (one sheet)', len(pg.query_selector_all('.overlay:not(.closing)')) == 1 and 'برداشت' in pg.inner_text('.sheet-head h2'))
