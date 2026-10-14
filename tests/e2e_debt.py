@@ -141,8 +141,8 @@ with sync_playwright() as p:
 
     # ۷) عوض کردن واحد وقتی تسویه داره → ممنوع
     open_debt('رضا'); pg.click('#dedit'); wait(500)
-    pg.click('#dasset [data-a=irr]'); pg.fill('.sheet [name=damount]', '1000'); pg.click('#dsave'); wait(300)
-    check('unit change blocked when settles exist', 'واحدش' in toast() and next(x for x in S()['debts'] if x['person'] == 'رضا')['asset'] == 'usd')
+    # نسخه‌ی ۱۵: واحدهای دیگه غیرفعال‌ان (به‌جای خطا بعد از ذخیره)
+    check('unit change blocked when settles exist (other units disabled)', pg.is_disabled('#dasset [data-a=irr]') and not pg.is_disabled('#dasset [data-a=usd]') and next(x for x in S()['debts'] if x['person'] == 'رضا')['asset'] == 'usd')
     pg.click('[data-close] >> nth=-1'); wait(300)
     if pg.query_selector('.overlay'): pg.click('[data-close]'); closed()
     # بدهی تومانی قدیمی مثل قبل

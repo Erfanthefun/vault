@@ -352,6 +352,80 @@
     const next = left > 0 ? items.find(x => x.status === 'late' || x.status === 'due') || null : null;
     return { mode, items, next, left };
   }
+  // ---------- بخش‌های بدهی و طلب و روش برگشت (نسخه‌ی ۱۵) ----------
+  // d.parts = [{ id, date, q, r, src?, rec? }]: هر قرض جدا؛ مثلاً «هر ماه ۳۰ دلار از حسین» = هر ماه یک بخش. d.amount = جمع q.
+  //   r = معادل ریالی روز ثبت (ریال) یا null. src = ثبتی که ساختتش ({tx}|{op})، rec = تاریخ نوبتِ قرض تکرارشونده.
+  // d.ret = 'rial' («معادل ریالی برمی‌گرده»): دو عدد موازی، مقدار (جمع q) و جمع معادل‌ها (جمع r). پرداخت به همون واحد (یا دلار↔تتر)
+  //   از مقدار کم می‌شه و پرداخت تومانی (یا با دارایی دیگه، با ارزش روز) از طرف ریالی. هر دو به ترتیب قدیمی‌ترین بخش؛ پرداختِ قسمتی
+  //   از یک بخش، همون بخش رو به نسبت از هر دو طرف کم می‌کنه. هر چیز دیگه ('unit' یا بدون مقدار) = «به همون واحد برمی‌گرده».
+  // d.settles[i] = { amount /*به واحد بدهی*/, r? /*تسویه‌ی ریالی: ریالی که کم شد*/, date, txId|opId }. amount تسویه‌ی ریالی
+  //   با بازپخش حساب و ذخیره می‌شه (debtRecalc) تا بقیه‌ی کد مثل قبل با amount کار کنه.
+  const EPS = 1e-9;
+  const debtParts = d => Array.isArray(d.parts) && d.parts.length ? d.parts : [{ id: (d.id || '') + 'p', date: d.date, q: d.amount, r: null }];
+  const isRialRet = d => !!d && d.ret === 'rial' && (d.asset || 'irr') !== 'irr';
+  function debtReplay(d) {
+    const rial = isRialRet(d);
+    const parts = debtParts(d).map((p, i) => ({ p, i })).sort((a, b) => (a.p.date || '').localeCompare(b.p.date || '') || a.i - b.i)
+      .map(({ p }) => ({ id: p.id, date: p.date, q: p.q, r: typeof p.r === 'number' ? p.r : null, rec: p.rec, src: p.src, f: 1 }));
+    const S = d.settles || [], amounts = S.map(s => s.amount || 0);
+    const order = S.map((s, i) => ({ s, i })).sort((a, b) => (a.s.date || '').localeCompare(b.s.date || '') || a.i - b.i);
+    let lastR = -1;
+    for (const { s, i } of order) {
+      const byR = rial && typeof s.r === 'number';
+      let need = byR ? s.r : (s.amount || 0), gotQ = 0;
+      for (const p of parts) {
+        if (need <= EPS) break;
+        const base = byR ? (p.r || 0) : p.q;
+        if (p.f <= EPS || base <= 0) continue;
+        const take = Math.min(p.f * base, need), df = take / base;
+        p.f -= df; need -= take; gotQ += df * p.q;
+      }
+      if (byR) { amounts[i] = Math.round(gotQ); lastR = i; }
+    }
+    for (const p of parts) if (p.f < EPS) p.f = 0;
+    const total = parts.reduce((s, p) => s + p.q, 0);
+    // همه‌چیز صاف شده: گرد کردن تسویه‌های ریالی نباید ته‌مونده‌ی مقداری بذاره
+    if (lastR >= 0 && parts.every(p => p.f === 0)) amounts[lastR] += total - amounts.reduce((s, x) => s + x, 0);
+    for (const p of parts) {
+      p.leftQ = p.f * p.q; p.leftR = p.r === null ? null : p.f * p.r;
+      p.status = p.f === 0 ? 'paid' : p.f < 1 - EPS ? 'partial' : 'open';
+    }
+    const leftQ = Math.max(0, total - amounts.reduce((s, x) => s + x, 0));
+    const leftR = rial ? Math.max(0, Math.round(parts.reduce((s, p) => s + (p.leftR || 0), 0))) : null;
+    const totalR = parts.every(p => p.r !== null) ? parts.reduce((s, p) => s + p.r, 0) : null;
+    return { parts, amounts, total, leftQ, leftR: leftQ <= 0 && rial ? 0 : leftR, totalR, rial };
+  }
+  // مقدار کل و مبلغ تسویه‌های ریالی رو از روی بخش‌ها و تسویه‌ها دوباره می‌سازه
+  function debtRecalc(d) {
+    if (Array.isArray(d.parts) && d.parts.length) d.amount = d.parts.reduce((s, p) => s + p.q, 0);
+    const R = debtReplay(d);
+    (d.settles || []).forEach((s, i) => { s.amount = R.amounts[i]; });
+    return R;
+  }
+  // ارزش ریالیِ q از یک بدهی/طلب «معادل ریالی» (به نسبت مانده‌ی دو طرف)
+  function debtRialOf(d, q) {
+    const R = debtReplay(d);
+    if (R.leftQ > 0 && R.leftR !== null) return Math.round(q * R.leftR / R.leftQ);
+    return R.totalR !== null && R.total > 0 ? Math.round(q * R.totalR / R.total) : null;
+  }
+  // قرض تکرارشونده: d.rec = { q, first, day, n?, until?, skip: [] }؛ هر نوبت با تأیید کاربر یک بخش (part.rec = تاریخ نوبت) می‌شه.
+  // نوبت‌های ثبت‌نشده و ردنشده تا تاریخ upto
+  function debtRecDue(d, upto) {
+    const R = d.rec; if (!R || !(R.q > 0) || !/^\d{4}\/\d{2}\/\d{2}$/.test(R.first || '')) return [];
+    const done = new Set(debtParts(d).map(p => p.rec).filter(Boolean)), skip = new Set(R.skip || []);
+    const day = R.day || jParse(R.first).d, out = [];
+    for (let k = 0; k < 600; k++) {
+      if (R.n && k >= R.n) break;
+      const due = addMonths(R.first, k, day);
+      if (R.until && due > R.until) break;
+      if (upto && due > upto) break;
+      if (!done.has(due) && !skip.has(due)) out.push({ k, due, q: R.q });
+    }
+    return out;
+  }
+  // نوبت بعدیِ ثبت‌نشده (هر تاریخی) یا null اگه تکرار تموم شده
+  const debtRecNext = d => debtRecDue(d, null)[0] || null;
+
   // ارزش ریالی یک تسویه: مبلغ تراکنشش، یا ارزش ثبت‌شده‌ی عملیات دارایی‌اش، وگرنه با قیمت امروز
   function settleRial(state, d, s) {
     if (s.txId) { const t = state.tx.find(x => x.id === s.txId); if (t) return t.amount || 0; }
@@ -636,6 +710,7 @@
     MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomeMatches, incomesForMonth, openObligations, monthStats, loanDue, loanSummary,
     ymIndex, monthOutflow, cashFlow, txAccountDelta, afterAnchor, accountBalance, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis,
     setRate, loanAmt, unitOf, debtMode, debtSchedule, debtFlow, settleRial, loanRecvRial, DEBT_GRACE,
+    debtParts, isRialRet, debtReplay, debtRecalc, debtRialOf, debtRecDue, debtRecNext,
     creditOpen, creditUsed, creditStatements, creditOpenMonths, creditSettleSet, migrateCredit };
   root.J = root.Core;
 })(typeof window !== 'undefined' ? window : globalThis);

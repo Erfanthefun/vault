@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۱۵٫۱';
+  const VERSION = '۱۵٫۲';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -101,6 +101,15 @@
     s.debts.forEach(x => { if (x.plan && !(x.plan.amount > 0 && /^\d{4}\/\d{2}\/\d{2}$/.test(x.plan.first || ''))) delete x.plan; });
     // بدهی تاریخ‌دارِ نسخه‌های قبل: از روز به‌روزرسانی در «بالانس بدهی و طلب» حساب می‌شه (عددهای ماه‌های قبل عوض نمی‌شن)
     s.debts.forEach(x => { if ((x.due || x.plan) && !x.sched) x.sched = C.today(); });
+    // نسخه‌ی ۱۵: هر مورد چند بخش (مورد قدیمی = یک بخش)، روش برگشت («به همون واحد» پیش‌فرض) و قرض تکرارشونده‌ی معتبر
+    s.debts.forEach(x => {
+      if (Array.isArray(x.parts)) x.parts = x.parts.filter(q => q && q.id && Number.isSafeInteger(q.q) && q.q > 0 && /^\d{4}\/\d{2}\/\d{2}$/.test(q.date || ''));
+      Flow.ensureParts(x);
+      if (x.ret !== 'rial' || x.asset === 'irr') delete x.ret;
+      if (x.rec && !(x.rec.q > 0 && /^\d{4}\/\d{2}\/\d{2}$/.test(x.rec.first || ''))) delete x.rec;
+      if (x.rec) x.rec.skip = Array.isArray(x.rec.skip) ? x.rec.skip : [];
+      C.debtRecalc(x);
+    });
     return s;
   }
   let S;
@@ -225,13 +234,16 @@
   const openDebts = () => S.debts.filter(d => debtLeft(d) > 0);
   // بدهی/طلب می‌تونه به هر واحد دارایی باشه (طلا، دلار، …)؛ جمع‌ها با ارزش امروز به ریال
   const dAsset = d => d.asset || 'irr';
-  const debtVal = (d, q) => dAsset(d) === 'irr' ? q : window.Inv ? window.Inv.valueNow(dAsset(d), q) : null;
+  // «معادل ریالی برمی‌گرده»: ارزش از جمع معادل‌های ثبت‌شده (به نسبت مانده)، نه قیمت امروز
+  const debtVal = (d, q) => dAsset(d) === 'irr' ? q : C.isRialRet(d) ? C.debtRialOf(d, q) : window.Inv ? window.Inv.valueNow(dAsset(d), q) : null;
   const debtQty = (d, q, unit = true) => dAsset(d) === 'irr' ? money(q, unit) : window.Inv.qtyTxt(q, dAsset(d));
   const debtShow = (d, q) => {
     if (dAsset(d) === 'irr') return money(q);
     const v = debtVal(d, q);
+    if (C.isRialRet(d)) return `${esc(debtQty(d, q))} <small class="dval">یا ${v === null ? '—' : money(v)}</small>`;
     return `${esc(debtQty(d, q))} <small class="dval">${v === null ? 'بدون قیمت' : '≈ ' + money(v)}</small>`;
   };
+  const retName = d => C.isRialRet(d) ? 'معادل ریالی برمی‌گرده' : 'به همون واحد برمی‌گرده';
   // ---------- برنامه‌ی بازپرداخت بدهی و طلب (نسخه‌ی ۱۴) ----------
   const DST = { paid: 'پرداخت شد', partial: 'ناقص', missed: 'پرداخت نشد', late: 'سررسید گذشته', due: '' };
   // هر قسط (یا موعد) به شکل یک ردیف تعهد؛ closed = پنجره‌اش بسته شده (کامل، ناقص یا پرداخت‌نشده)
@@ -248,16 +260,22 @@
     });
   }
   const allDebtItems = () => S.debts.flatMap(debtItems);
+  // نوبت‌های قرض تکرارشونده که تا upto ثبت نشده‌ن (با تأیید کاربر ثبت می‌شن)
+  const recName = d => (d.dir === 'owe' ? 'قرض ماهانه از ' : 'قرض ماهانه به ') + d.person;
+  const recItems = upto => S.debts.filter(d => d.rec).flatMap(d => C.debtRecDue(d, upto).map(o => ({
+    kind: 'debtrec', id: d.id, key: o.due, name: recName(d), sub: 'تکرار ماهانه', unit: dAsset(d), qty: o.q,
+    amount: dAsset(d) === 'irr' ? o.q : (window.Inv && window.Inv.valueNow(dAsset(d), o.q)) || 0, due: o.due, paid: false, inc: d.dir === 'owe', variable: dAsset(d) !== 'irr' })));
+  const monthEnd = m => m + '/31';
   // خلاصه‌ی موعد برای کارت بدهی/طلب
   function debtWhen(d) {
     const sc = C.debtSchedule(d, today());
-    if (sc.mode === 'none') return 'بدون موعد';
+    if (sc.mode === 'none') { const nx = d.rec && C.debtRecNext(d); return nx ? `تکرار ماهانه، نوبت بعدی ${dateTitle(nx.due)}` : 'بدون موعد'; }
     if (sc.mode === 'date') return sc.next && sc.next.status === 'late' ? `<b class="neg">موعد گذشته (${dateTitle(d.due)})</b>` : 'موعد ' + dateTitle(d.due);
     const n = sc.next; if (!n) return 'قسطی';
     return `${n.status === 'late' ? '<b class="neg">' : ''}قسط بعدی ${dateTitle(n.due)}، ${esc(debtQty(d, n.left))}${n.status === 'late' ? '</b>' : ''}`;
   }
   // باز و سررسیده تا آخر ماه m (عقب‌افتاده‌ها هم)
-  const debtOpenUntil = m => allDebtItems().filter(o => !o.paid && ym(o.due) <= m);
+  const debtOpenUntil = m => allDebtItems().filter(o => !o.paid && ym(o.due) <= m).concat(recItems(monthEnd(m)));
   function openDebtPay(id, key) {
     const d = S.debts.find(x => x.id === id); if (!d) return;
     const o = debtItems(d).find(x => x.key === String(key));
@@ -512,8 +530,8 @@
     const barMax = Math.max(cf.in, cf.out, 1), barW = v => v ? Math.max(2, Math.round(v / barMax * 100)) : 0;
     const pctTxt = r => `<bdi dir="ltr">${r < 0 ? '−' : ''}${faDigits(Math.round(Math.abs(r) * 100))}٪</bdi>`;
     const cred = creditHomeItems(cur);
-    const dItems = allDebtItems(), dOpen = dItems.filter(o => !o.paid && ym(o.due) <= cur);
-    const debtDue = dOpen.filter(o => !o.inc).reduce((s, o) => s + o.amount, 0);
+    const dItems = allDebtItems(), dOpen = dItems.filter(o => !o.paid && ym(o.due) <= cur).concat(recItems(monthEnd(cur)));
+    const debtDue = dOpen.filter(o => o.kind === 'debt' && !o.inc).reduce((s, o) => s + o.amount, 0);
     const unpaidList = overdue.concat(st.obs.filter(o => !o.paid), st.inc.filter(i => !i.paid), cred.filter(c => !c.paid), dOpen).sort(byDue);
     const paidList = st.obs.filter(o => o.paid).concat(st.inc.filter(i => i.paid), cred.filter(c => c.paid), dItems.filter(o => o.paid && o.status !== 'missed' && ym(o.due) === cur)).sort(byDue);
     const recent = feedAll().sort(feedSort).slice(0, 4);
@@ -861,14 +879,16 @@
       if (d.dir !== dir) continue;
       const k = personKey(d.person); if (!k) continue;
       if (!map.has(k)) map.set(k, { name: k, debts: [], total: 0, unpriced: 0, units: {} });
-      const g = map.get(k), q = debtLeft(d), v = debtVal(d, q), a = dAsset(d);
+      const g = map.get(k), q = debtLeft(d), v = debtVal(d, q), a = dAsset(d) + (C.isRialRet(d) ? ':r' : '');
       g.debts.push(d); g.units[a] = (g.units[a] || 0) + q;
       if (v === null) g.unpriced++; else g.total += v;
     }
     return [...map.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'fa'));
   }
   // «۲۰۰ میلیون تومان + ۵۰ دلار»؛ تومانی همیشه اول
-  const unitsTxt = units => Object.keys(units).sort((a, b) => (a === 'irr' ? -1 : b === 'irr' ? 1 : 0)).map(a => debtQty({ asset: a }, units[a])).join(' + ');
+  // کلید «usd:r» = دلاری که معادل ریالی برمی‌گرده
+  const unitsTxt = units => Object.keys(units).sort((a, b) => (a === 'irr' ? -1 : b === 'irr' ? 1 : a.localeCompare(b))).map(k => {
+    const [a, r] = k.split(':'); return debtQty({ asset: a }, units[k]) + (r ? ' (برگشت ریالی)' : ''); }).join(' + ');
   const unitsMixed = g => Object.keys(g.units).length > 1 || !g.units.irr;
   // موعد نزدیک‌ترِ یک نفر (برای خلاصه‌ی کارت)
   function personWhen(g) {
@@ -1359,6 +1379,8 @@
     const cash = () => (E.kind === 'out' || E.kind === 'in') && Flow.CASH.includes(E.why);
     const showCats = () => (E.kind === 'out' && E.why === 'expense') || (E.kind === 'in' && E.why === 'income');
     const showValue = () => (E.kind === 'out' || E.kind === 'in') && E.asset !== 'irr';
+    const newDebt = () => (E.kind === 'out' || E.kind === 'in') && (E.why === 'lend' || E.why === 'borrow');
+    let joinSel = 'auto';
     const isCredit = id => !!S.accounts.find(a => a.id === id && a.kind === 'credit');
     const catType = () => E.kind === 'in' ? 'income' : 'expense';
     const accLbl = () => E.kind === 'out' ? 'از کدوم حساب؟' : E.kind === 'in' ? 'به کدوم حساب؟' : 'از حساب';
@@ -1371,8 +1393,14 @@
       return `<label class="lbl">${lbl}</label>${a === 'irr' ? amountInput(nm, q) : qtyField(nm, a, q)}`;
     };
     function debtBlock() {
-      if (E.why === 'lend' || E.why === 'borrow') return `<label class="lbl" for="tperson">${E.why === 'lend' ? 'به کی قرض دادی؟' : 'از کی قرض گرفتی؟'}</label>
-        <input id="tperson" list="tpeople" value="${esc(E.person)}" placeholder="نام" autocomplete="off"><datalist id="tpeople">${people().map(n => `<option value="${esc(n)}">`).join('')}</datalist>`;
+      if (E.why === 'lend' || E.why === 'borrow') {
+        const md = E.inDebt && S.debts.find(x => x.id === E.inDebt);
+        return `<label class="lbl" for="tperson">${E.why === 'lend' ? 'به کی قرض دادی؟' : 'از کی قرض گرفتی؟'}</label>
+        <input id="tperson" list="tpeople" value="${esc(E.person)}" placeholder="نام" autocomplete="off" ${md ? 'readonly' : ''}><datalist id="tpeople">${people().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+        ${md ? `<p class="hint">یکی از قرض‌های «${esc(debtTitle(md))}»؛ اسم، دارایی و روش برگشتش از خود اون مورد عوض می‌شه.</p>` : ''}
+        ${E.asset !== 'irr' ? `${retChips('tret', E.ret)}<p class="hint">${retHint(E.ret)}</p>` : ''}
+        <div id="tjoinw"></div>`;
+      }
       if (E.why === 'repay' || E.why === 'collect') {
         const dir = E.why === 'repay' ? 'owe' : 'owed';
         const list = S.debts.filter(d => d.dir === dir && (debtLeft(d) > 0 || d.id === E.debt));
@@ -1417,13 +1445,13 @@
       <label class="lbl" for="acc" id="acclbl">${accLbl()}</label><select id="acc">${placeOptions(E.acc, { credit: E.kind === 'out' && (E.why === 'expense' || E.why === 'gift'), none: E.kind !== 'conv' })}</select>
       ${lock ? '' : `<p class="lbl">${E.kind === 'conv' ? 'چی دادی؟' : 'چی؟'}</p>${assetChips('tasset', E.asset, a => cred && a !== 'irr')}`}
       <div id="amtw">${amtBlock(1)}</div><p class="hint" id="have" hidden></p>
-      <div id="valw" ${showValue() ? '' : 'hidden'}><label class="lbl">معادل ${unitLabel()}ی</label>${amountInput('value', E.value || 0)}<p class="hint" id="valhint"></p></div>
+      <div id="valw" ${showValue() ? '' : 'hidden'}><label class="lbl">${newDebt() ? `معادل ریالی روز ${E.ret === 'rial' ? '' : '<small>(اختیاری)</small>'}` : `معادل ${unitLabel()}ی`}</label>${amountInput('value', E.value || 0)}<p class="hint" id="valhint"></p></div>
       ${E.kind === 'move' || E.kind === 'conv' ? `<div id="towrap"><label class="lbl" for="acc2">به حساب</label><select id="acc2">${placeOptions(E.acc2, { none: E.kind === 'move' })}</select>
         ${E.kind === 'conv' ? `<p class="lbl">چی گرفتی؟</p>${assetChips('tasset2', E.asset2, a => a === E.asset)}<div id="amtw2">${amtBlock(2)}</div>` : ''}<p class="hint" id="have2" hidden></p></div>` : ''}
       <div class="summary" id="tsum" hidden></div>
       <label class="lbl">${E.why === 'loan' ? 'تاریخ دریافت' : 'تاریخ'}</label>${dateField('date', E.date, true)}
       ${E.kind === 'in' && E.why === 'loan' ? loanBlock() : ''}
-      ${(E.kind === 'out' || E.kind === 'in') && (E.why === 'lend' || E.why === 'borrow') ? `<div class="loanbox">${schedBlock('t', E.asset, schedMode(E), E.due, E.plan)}</div>` : ''}
+      ${(E.kind === 'out' || E.kind === 'in') && (E.why === 'lend' || E.why === 'borrow') && !E.inDebt ? `<div class="loanbox" id="tschedw">${schedBlock('t', E.asset, schedMode(E), E.due, E.plan)}</div>` : ''}
       <div id="catwrap" ${showCats() ? '' : 'hidden'}><label class="lbl">دسته</label><div class="catgrid" id="cats">${catChips(catType(), cat)}</div></div>
       ${E.kind === 'out' && E.why === 'expense' ? `<div id="linkwrap"><label class="lbl" for="link">مربوط به قسط یا قبض؟</label><select id="link">${linkOptions(E.link && E.link.kind !== 'income' && E.link.kind !== 'credit' ? E.link : null)}</select></div>` : ''}
       ${E.kind === 'in' && E.why === 'income' && S.incomes.length ? `<div id="inclinkwrap"><label class="lbl" for="inclink">مربوط به درآمد ثابت؟</label><select id="inclink">${incLinkOptions(E.link && E.link.kind === 'income' ? E.link : null)}</select></div>` : ''}
@@ -1461,8 +1489,10 @@
       function live() {
         readForm();
         const P = Flow.place(S, E.acc);
-        if (showValue() && !valueDirty) { E.value = E.q ? Flow.valueAt(S, E.asset, E.q, E.date) : null; setVal(E.value); }
-        if (showValue()) {
+        // قرض تازه: معادل ریالی خودکار فقط برای امروز یا روزی که قیمتش ثبت شده
+        if (showValue() && !valueDirty) { E.value = E.q ? (newDebt() ? Flow.rialAuto(S, E.asset, E.q, E.date) : Flow.valueAt(S, E.asset, E.q, E.date)) : null; setVal(E.value); }
+        if (showValue() && newDebt()) $('#valhint', ov).innerHTML = rialHintTxt(E.asset, E.date, Flow.rialAuto(S, E.asset, E.q || 1, E.date));
+        else if (showValue()) {
           const Pd = V.priceAt(S, E.date), u = V.unitRial(E.asset, Pd, S.settings);
           $('#valhint', ov).innerHTML = u ? `با قیمت ثبت‌شده‌ی ${dateTitle(Pd.date)}: هر ${esc(assetUnit(E.asset))} <b>${money(u * V.ASSETS[E.asset].base)}</b>. اگه فرق داشته، عدد رو عوض کن.`
             : `قیمتی برای ${esc(V.ASSETS[E.asset].name)} ثبت نشده؛ معادل رو دستی بنویس.`;
@@ -1477,18 +1507,32 @@
         };
         const h1 = haveTxt(E.acc, E.asset, P); $('#have', ov).innerHTML = h1; $('#have', ov).hidden = !h1;
         if ($('#have2', ov)) { const a2 = E.kind === 'conv' ? E.asset2 : E.asset, h2 = haveTxt(E.acc2, a2, Flow.place(S, E.acc2)); $('#have2', ov).innerHTML = h2; $('#have2', ov).hidden = !h2; }
+        // اضافه به مورد باز همون شخص (فقط ثبت تازه)
+        const jw = $('#tjoinw', ov);
+        if (jw) {
+          const m = !edit && !E.inDebt ? matchDebt(E.why === 'lend' ? 'owed' : 'owe', E.person, E.asset, E.ret) : null;
+          E.joinDebt = m && joinSel !== 'sep' ? m.id : '';
+          jw.innerHTML = m ? `<p class="lbl">با «${esc(m.person)}» از قبل یه مورد باز هم‌نوع داری</p><div class="chips seg" id="tjoin" role="group" aria-label="اضافه به مورد فعلی یا جدا">
+            <button type="button" class="chip ${E.joinDebt ? 'on' : ''}" data-j="join" aria-pressed="${!!E.joinDebt}">اضافه به همون (مانده ${esc(debtQty(m, debtLeft(m)))})</button>
+            <button type="button" class="chip ${E.joinDebt ? '' : 'on'}" data-j="sep" aria-pressed="${!E.joinDebt}">مورد جدا</button></div>` : '';
+          if ($('#tschedw', ov)) $('#tschedw', ov).hidden = !!E.joinDebt;
+        }
         // خلاصه
         const lines = [];
         if (showValue() && E.value) lines.push(`ارزش: <b>${money(E.value)}</b>`);
         if ((E.why === 'lend' || E.why === 'borrow') && (E.kind === 'out' || E.kind === 'in') && E.q)
-          lines.push(`«${E.why === 'lend' ? 'طلبکار از' : 'بدهکار به'} ${esc(E.person.trim() || '…')}»: <b>${esc(qtyText(E.q, E.asset))}</b> در «بدهی و طلب» ثبت می‌شه.`);
+          lines.push(E.joinDebt ? `به «${esc(debtTitle(S.debts.find(x => x.id === E.joinDebt)))}» اضافه می‌شه: <b>${esc(qtyText(E.q, E.asset))}</b>${E.ret === 'rial' && E.value ? ` (معادل ${money(E.value)})` : ''}.`
+            : `«${E.why === 'lend' ? 'طلبکار از' : 'بدهکار به'} ${esc(E.person.trim() || '…')}»: <b>${esc(qtyText(E.q, E.asset))}</b>${E.ret === 'rial' && E.asset !== 'irr' ? ' با برگشت معادل ریالی' : ''} در «بدهی و طلب» ثبت می‌شه.`);
         if ((E.why === 'repay' || E.why === 'collect') && (E.kind === 'out' || E.kind === 'in') && E.debt && E.q) {
           const d = S.debts.find(x => x.id === E.debt);
           if (d) {
             const own = (Flow.collect(S, ref || {}) || {}).prim, mine = own ? (d.settles || []).filter(s => s.txId === own.id || s.opId === own.id).reduce((s, x) => s + x.amount, 0) : 0;
             const left = debtLeft(d) + mine, x = Flow.settleQty(S, d, Object.assign({}, E, { value: E.asset === 'irr' ? E.q : E.value }));
+            const mineR = own ? (d.settles || []).filter(s => (s.txId === own.id || s.opId === own.id) && typeof s.r === 'number').reduce((s, y) => s + y.r, 0) : 0;
             if (x.err) lines.push(esc(x.err));
-            else lines.push(`از «${esc(debtTitle(d))}» کم می‌شه: <b>${esc(debtQty(d, Math.min(x.q, left)))}</b>${dAsset(d) !== E.asset ? ' (با قیمت همون روز)' : ''}، مانده بعدش: ${esc(debtQty(d, Math.max(0, left - x.q)))}${x.q > left ? '. بیشتر از مانده‌ست؛ فقط تا مانده تسویه می‌شه.' : ''}`);
+            else if (x.r !== undefined) { const lr = (C.debtReplay(d).leftR || 0) + mineR;
+              lines.push(`از معادل ریالیِ «${esc(debtTitle(d))}» کم می‌شه: <b>${money(Math.min(x.r, lr))}</b> (از قدیمی‌ترین قرض)، مانده‌ی ریالی بعدش: ${money(Math.max(0, lr - x.r))}${x.r > lr ? '. بیشتر از مانده‌ست؛ فقط تا مانده تسویه می‌شه.' : ''}`); }
+            else lines.push(`از «${esc(debtTitle(d))}» کم می‌شه: <b>${esc(debtQty(d, Math.min(x.q, left)))}</b>${dAsset(d) !== E.asset ? (x.peg ? ' (یک‌به‌یک)' : ' (با قیمت همون روز)') : ''}، مانده بعدش: ${esc(debtQty(d, Math.max(0, left - x.q)))}${x.q > left ? '. بیشتر از مانده‌ست؛ فقط تا مانده تسویه می‌شه.' : ''}`);
           }
         }
         if (E.kind === 'conv' && E.q && E.q2 && E.asset !== E.asset2) {
@@ -1534,7 +1578,9 @@
       ov.addEventListener('click', e => {
         const k = e.target.closest('#ttype [data-t]'), w = e.target.closest('#twhy [data-w]'), a1 = e.target.closest('#tasset [data-a]'), a2 = e.target.closest('#tasset2 [data-a]');
         const c = e.target.closest('#cats [data-cat]'), sd = e.target.closest('[data-setdate]'), dm = e.target.closest('#tmode [data-m]');
-        const lu = e.target.closest('#lnunit [data-u]');
+        const lu = e.target.closest('#lnunit [data-u]'), rt = e.target.closest('#tret [data-r]'), jn = e.target.closest('#tjoin [data-j]');
+        if (rt) { readForm(); E.ret = rt.dataset.r; paint(); return; }
+        if (jn) { joinSel = jn.dataset.j; readForm(); paint(); return; }
         if (lu) { readForm(); if (E.loan && E.loan.unit !== lu.dataset.u) { E.loan.unit = lu.dataset.u; E.loan.amount = 0; } paint(); return; }
         if (dm) { readForm(); const m = dm.dataset.m; E.due = m === 'date' ? (E.due || C.addMonths(today(), 1)) : null; E.plan = m === 'plan' ? (E.plan || { amount: 0, first: C.addMonths(today(), 1) }) : null; paint(); return; }
         if (k) {
@@ -1608,6 +1654,7 @@
           if (bk) S.settings.lastBank = bk.id;
           done = true; save(); closeSheet(ov); refreshSheets(); render();
           const extra = r.info.debt && r.info.debt.made ? ` «${r.info.debt.dir === 'owed' ? 'طلبکار از' : 'بدهکار به'} ${r.info.debt.person}» ساخته شد.`
+            : r.info.debt && r.info.debt.joined ? ` به «${r.info.debt.dir === 'owed' ? 'طلبکار از' : 'بدهکار به'} ${r.info.debt.person}» اضافه شد.`
             : r.info.loan ? (r.info.loan.made ? ` وام «${r.info.loan.name}» با اقساطش در «تعهدات › اقساط» ساخته شد.` : ` وام «${r.info.loan.name}» به‌روز شد.`)
             : r.info.removedLoan ? ' وامی که با این واریز ساخته شده بود حذف شد.'
             : r.info.settle ? ` ${r.info.settle.left > 0 ? 'از مانده کم شد' : 'تسویه شد'}${r.info.settle.over ? ' (بیشتر از مانده بود)' : ''}.` : r.info.keptDebt ? ' بدهی/طلبی که ساخته بود چون تسویه داره، باقی موند.' : '';
@@ -1691,6 +1738,7 @@
   // پرداخت یک‌لمسی برای مبلغ ثابت؛ مورد متغیر مبلغ واقعی رو می‌پرسه
   function quickPay(kind, id, key) {
     if (kind === 'debt') { openDebtPay(id, key); return; }
+    if (kind === 'debtrec') { openRecConfirm(id, key); return; }
     if (kind === 'loan' && loanUnit(id) !== 'irr') { openLoanAssetPay(id, key); return; }
     const o = getOb(kind, id, key); if (!o || o.paid) return;
     if (kind === 'credit') { openCreditPay(id, key); return; }
@@ -1731,6 +1779,7 @@
   }
   function openPay(kind, id, key) {
     if (kind === 'debt') { openDebtPay(id, key); return; }
+    if (kind === 'debtrec') { openRecConfirm(id, key); return; }
     const o = getOb(kind, id, key); if (!o) return;
     if (o.paid) { askUnpay(kind, id, key); return; }
     if (kind === 'loan' && loanUnit(id) !== 'irr') { openLoanAssetPay(id, key); return; }
@@ -2046,61 +2095,189 @@
     return upd;
   }
 
+  // ---------- فرم بدهی و طلب (نسخه‌ی ۱۵: روش برگشت، معادل ریالی روز، اضافه به مورد باز همون شخص، تکرار ماهانه) ----------
+  const retKey = d => C.isRialRet(d) ? 'rial' : 'unit';
+  // مورد باز هم‌نوع با همون شخص (برای «اضافه به بدهی فعلی»)
+  function matchDebt(dir, person, asset, ret) {
+    const k = personKey(person); if (!k) return null;
+    return openDebts().filter(d => d.dir === dir && personKey(d.person) === k && dAsset(d) === asset && (asset === 'irr' || retKey(d) === ret))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0] || null;
+  }
+  const RETS = [['unit', 'به همون واحد'], ['rial', 'معادل ریالی']];
+  const retHint = r => r === 'rial' ? 'موقع پس دادن، جمع معادل ریالی روزهای قرض برمی‌گرده (یا همون مقدار به همون واحد). معادل هر قرض لازمه.'
+    : 'همون مقدار برمی‌گرده؛ ارزش تومانی‌اش با قیمت روز بالا و پایین می‌ره. معادل روز فقط برای سابقه‌ست.';
+  const retChips = (id, r) => `<p class="lbl">برگشتش چطوره؟</p><div class="chips seg" id="${id}" role="group" aria-label="روش برگشت">${RETS.map(([k, n]) =>
+    `<button type="button" class="chip ${r === k ? 'on' : ''}" data-r="${k}" aria-pressed="${r === k}">${n}</button>`).join('')}</div>`;
+  // راهنمای فیلد معادل ریالی: خودکار فقط برای امروز (آخرین قیمت) یا روزی که قیمتش ثبت شده
+  function rialHintTxt(asset, date, auto) {
+    if (asset === 'irr') return '';
+    if (auto === null) return 'برای این روز قیمتی ثبت نشده؛ معادل ریالی اون روز رو خودت بنویس.';
+    const P = V.priceAt(S, date), u = V.unitRial(asset, P, S.settings);
+    return `با قیمت ثبت‌شده‌ی ${dateTitle(P.date)}: هر ${esc(assetUnit(asset))} <b>${money(u * V.ASSETS[asset].base)}</b>. اگه فرق داشته، عوضش کن.`;
+  }
+  const setAmt = (root, name, rial) => { const v = $(`[name="${name}"]`, root); if (!v) return; const x = rial ? faNum(disp(rial)) : ''; v.value = x; v.dataset.orig = rial || ''; v.dataset.init = x; };
+  const qtyInputVal = (root, name, a) => { const el = $(`[name="${name}"]`, root); return !el ? 0 : a === 'irr' ? readAmount(root, name) : (el.value.trim() ? V.parseQty(el.value, a) || 0 : 0); };
+  const qtyFieldAny = (name, a, q) => a === 'irr' ? amountInput(name, q || 0) : qtyField(name, a, q || 0);
+  // تکرار ماهانه
+  const REC_END = [['n', 'تعداد دفعات'], ['until', 'تا یک تاریخ'], ['none', 'نامحدود']];
+  function recBlock(p, R, asset, q, date) {
+    const on = !!R, first = R ? R.first : C.addMonths(date || today(), 1), mode = R ? (R.n ? 'n' : R.until ? 'until' : 'none') : 'n';
+    return `<div class="loanbox" id="${p}recw"><div class="chips"><button type="button" class="chip ${on ? 'on' : ''}" id="${p}recon" aria-pressed="${on}">تکرار ماهانه</button></div>
+      <div id="${p}recf" ${on ? '' : 'hidden'}>
+        <label class="lbl">مقدار هر بار</label><div id="${p}recqw">${qtyFieldAny(p + 'recq', asset, R ? R.q : q)}</div>
+        <label class="lbl">اولین نوبت</label>${dateField(p + 'recfirst', first)}
+        <p class="lbl">تا کِی؟</p><div class="chips seg" id="${p}recend" role="group" aria-label="پایان تکرار">${REC_END.map(([k, n]) =>
+          `<button type="button" class="chip ${mode === k ? 'on' : ''}" data-e="${k}" aria-pressed="${mode === k}">${n}</button>`).join('')}</div>
+        <div id="${p}recnw" ${mode === 'n' ? '' : 'hidden'}><label class="lbl" for="${p}recn">چند بار؟</label><input id="${p}recn" inputmode="numeric" value="${R && R.n ? faDigits(R.n) : ''}" placeholder="مثلاً ۱۲"></div>
+        <div id="${p}recuw" ${mode === 'until' ? '' : 'hidden'}><label class="lbl">آخرین نوبت تا</label>${dateField(p + 'recuntil', R && R.until ? R.until : C.addMonths(first, 11))}</div>
+        <p class="hint">هر ماه همون روز توی «پیش رو» میاد و با تأیید تو ثبت می‌شه (با معادل ریالی همون روز). هر بار انتخاب می‌کنی به حسابی اضافه بشه یا فقط ثبت بشه.</p>
+      </div></div>`;
+  }
+  // getQ: مقدار فرم (پیش‌فرضِ «مقدار هر بار» اگه خالی باشه)
+  function bindRec(ov, p, getAsset, getQ) {
+    if (!$(`#${p}recw`, ov)) return;
+    $(`#${p}recon`, ov).addEventListener('click', e => { const b = e.currentTarget, on = !b.classList.contains('on'); b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); $(`#${p}recf`, ov).hidden = !on;
+      const a = getAsset(), q = getQ ? getQ() : 0;
+      if (on && q && !qtyInputVal(ov, p + 'recq', a)) { $(`#${p}recqw`, ov).innerHTML = qtyFieldAny(p + 'recq', a, q); $$(`#${p}recqw input.amt`, ov).forEach(bindAmount); } });
+    $(`#${p}recend`, ov).addEventListener('click', e => { const b = e.target.closest('[data-e]'); if (!b) return;
+      $$(`#${p}recend .chip`, ov).forEach(c => { c.classList.toggle('on', c === b); c.setAttribute('aria-pressed', c === b); });
+      $(`#${p}recnw`, ov).hidden = b.dataset.e !== 'n'; $(`#${p}recuw`, ov).hidden = b.dataset.e !== 'until'; });
+    return () => { $(`#${p}recqw`, ov).innerHTML = qtyFieldAny(p + 'recq', getAsset(), 0); $$(`#${p}recqw input.amt`, ov).forEach(bindAmount); };
+  }
+  function readRec(ov, p, asset, fallbackQ) {
+    const on = $(`#${p}recon`, ov); if (!on || !on.classList.contains('on') || $(`#${p}recw`, ov).hidden) return null;
+    const q = qtyInputVal(ov, p + 'recq', asset) || fallbackQ || 0, first = readDate(ov, p + 'recfirst'), m = ($(`#${p}recend .chip.on`, ov) || {}).dataset;
+    if (!q) return { err: 'مقدار هر بار تکرار رو وارد کن.' };
+    const R = { q, first, day: C.jParse(first).d };
+    if (m && m.e === 'n') { const n = readInt($(`#${p}recn`, ov)); if (!(n >= 1 && n <= 600)) return { err: 'تعداد دفعات تکرار (۱ تا ۶۰۰) لازمه.' }; R.n = n; }
+    if (m && m.e === 'until') { R.until = readDate(ov, p + 'recuntil'); if (R.until < first) return { err: 'تاریخ پایان تکرار قبل از اولین نوبته.' }; }
+    return R;
+  }
+  const recEndTxt = R => R.n ? `${faDigits(R.n)} بار` : R.until ? `تا ${dateTitle(R.until)}` : 'بدون پایان';
+  // حذف کامل یک بدهی/طلب؛ ثبت‌های «قرض دادم/گرفتم» که بخش‌هاش رو ساختن هم حذف می‌شن
+  function deleteDebt(d) {
+    const srcs = Flow.ensureParts(d).map(p => p.src).filter(r => r && Flow.collect(S, r));
+    for (const r of srcs) { const res = Flow.remove(S, r); if (res.err) { toast(res.err, 'bad'); return false; } }
+    S.tx.forEach(t => { if (t.debt === d.id) delete t.debt; });
+    S.ops.forEach(o => { if (o.debt === d.id) delete o.debt; });
+    S.debts = S.debts.filter(x => x.id !== d.id);
+    return true;
+  }
   function openDebtForm(id, dir, person) {
     const d = id ? S.debts.find(x => x.id === id) : null;
     dir = d ? d.dir : dir || 'owe';
-    let asset = d ? dAsset(d) : 'irr';
-    // موردی که با «قرض دادم/گرفتم» ساخته شده: مقدار و دارایی‌اش از همون تراکنش میاد
-    const locked = !!(d && d.src && Flow.collect(S, d.src));
+    let asset = d ? dAsset(d) : 'irr', ret = d ? retKey(d) : 'unit', joinSel = 'auto', joinId = '';
+    const parts = d ? Flow.ensureParts(d) : [], single = !d || parts.length === 1, p0 = d ? parts[0] : null;
+    // مورد تک‌بخشی که با «قرض دادم/گرفتم» ساخته شده: مقدار، دارایی و معادلش از همون تراکنش میاد
+    const srcOf = x => x && x.src && Flow.collect(S, x.src) ? x.src : null;
+    const locked = !!(d && single && srcOf(p0)), anySrc = !!(d && parts.some(srcOf));
+    const lockAsset = !!d && (locked || !single || (d.settles || []).length > 0);
+    let rialDirty = !!(d && single && typeof p0.r === 'number');
     const people = [...new Set(S.debts.map(x => x.person))];
     const html = `
-      <div class="chips seg" id="ddir" role="group">${[['owe', 'بدهکارم به'], ['owed', 'طلبکارم از']].map(([k, n]) => `<button type="button" class="chip ${dir === k ? 'on' : ''}" data-d="${k}" aria-pressed="${dir === k}" ${locked ? 'disabled' : ''}>${n}</button>`).join('')}</div>
+      <div class="chips seg" id="ddir" role="group">${[['owe', 'بدهکارم به'], ['owed', 'طلبکارم از']].map(([k, n]) => `<button type="button" class="chip ${dir === k ? 'on' : ''}" data-d="${k}" aria-pressed="${dir === k}" ${anySrc ? 'disabled' : ''}>${n}</button>`).join('')}</div>
       <label class="lbl" for="dperson">شخص</label><input id="dperson" list="dpeople" value="${esc(d ? d.person : person || '')}" placeholder="نام">
       <datalist id="dpeople">${people.map(p => `<option value="${esc(p)}">`).join('')}</datalist>
       <label class="lbl">به چه واحدی؟</label>
-      <div class="chips seg wrap" id="dasset" role="group" aria-label="واحد بدهی یا طلب">${(window.Inv ? window.Inv.DEBT_ASSETS : ['irr']).map(a => `<button type="button" class="chip ${asset === a ? 'on' : ''}" data-a="${a}" aria-pressed="${asset === a}" ${locked ? 'disabled' : ''}>${esc(window.Inv ? window.Inv.debtAssetName(a) : 'تومان')}</button>`).join('')}</div>
-      <div id="dirr" ${asset === 'irr' ? '' : 'hidden'}><label class="lbl">مبلغ</label>${amountInput('damount', d && asset === 'irr' ? d.amount : 0)}</div>
+      <div class="chips seg wrap" id="dasset" role="group" aria-label="واحد بدهی یا طلب">${(window.Inv ? window.Inv.DEBT_ASSETS : ['irr']).map(a => `<button type="button" class="chip ${asset === a ? 'on' : ''}" data-a="${a}" aria-pressed="${asset === a}" ${lockAsset && a !== asset ? 'disabled' : ''}>${esc(V.ASSETS[a].name)}</button>`).join('')}</div>
+      ${single ? `<div id="dirr" ${asset === 'irr' ? '' : 'hidden'}><label class="lbl">مبلغ</label>${amountInput('damount', d && asset === 'irr' ? d.amount : 0)}</div>
       <div id="dqw" ${asset === 'irr' ? 'hidden' : ''}><label class="lbl" for="dqty" id="dqlbl">مقدار (${esc(asset === 'irr' ? '' : window.Inv.faUnit(asset))})</label>
-        <input id="dqty" inputmode="decimal" autocomplete="off" dir="ltr" value="${d && asset !== 'irr' ? esc(window.Inv.plainQty(d.amount, asset)) : ''}" placeholder="مثلاً ۵٫۲۵"></div>
-      ${locked ? `<p class="hint">مقدار و دارایی‌اش از تراکنش «${dir === 'owed' ? 'قرض دادم' : 'قرض گرفتم'}» میاد؛ برای عوض کردنش <button type="button" class="linkbtn" id="dsrc">اون تراکنش</button> رو ویرایش کن.</p>` : ''}
-      <label class="lbl">تاریخ</label>${dateField('ddate', d ? d.date : today(), true)}
-      ${schedBlock('d', asset, schedMode(d), d && d.due, d && d.plan)}
+        <input id="dqty" class="qtyin" inputmode="decimal" autocomplete="off" dir="ltr" value="${d && asset !== 'irr' ? esc(window.Inv.plainQty(d.amount, asset)) : ''}" placeholder="مثلاً ۵٫۲۵"></div>`
+        : `<p class="note">${faDigits(parts.length)} قرض، جمعاً ${esc(debtQty(d, d.amount))}. مقدار و معادل هر قرض از جزئیات همین مورد عوض می‌شه.</p>`}
+      <div id="dretw" ${asset === 'irr' ? 'hidden' : ''}>${retChips('dret', ret)}<p class="hint" id="drethint">${retHint(ret)}</p></div>
+      ${single ? `<div id="drialw" ${asset === 'irr' ? 'hidden' : ''}><label class="lbl">معادل ریالی روز <small id="dropt">${ret === 'rial' ? '' : '(اختیاری)'}</small></label>${amountInput('drial', d && typeof p0.r === 'number' ? p0.r : 0)}<p class="hint" id="drialhint"></p></div>` : ''}
+      ${locked ? `<p class="hint">مقدار، دارایی و معادلش از تراکنش «${dir === 'owed' ? 'قرض دادم' : 'قرض گرفتم'}» میاد؛ برای عوض کردنش <button type="button" class="linkbtn" id="dsrc">اون تراکنش</button> رو باز کن.</p>` : ''}
+      ${single ? `<label class="lbl">تاریخ</label>${dateField('ddate', d ? d.date : today(), true)}` : ''}
+      ${d ? '' : '<div id="djoinw"></div>'}
+      <div id="dschedw">${schedBlock('d', asset, schedMode(d), d && d.due, d && d.plan)}</div>
+      ${recBlock('d', d && d.rec, asset, d ? (d.rec ? d.rec.q : p0.q) : 0, d ? d.date : today())}
       <label class="lbl" for="dnote">توضیح</label><input id="dnote" value="${esc(d ? d.note : '')}" placeholder="اختیاری">
-      ${d ? '' : `<p class="note">برای ثبت پولی که الان دادی یا گرفتی، از «+ › برداشت یا واریز» گزینه‌ی «قرض دادم/گرفتم» رو بزن تا موجودی حساب هم درست بشه. اینجا فقط ثبتِ یه بدهی یا طلب قبلیه.</p>`}
+      ${d ? '' : `<p class="note">برای ثبت پولی که الان دادی یا گرفتی و از حسابی رفته یا به حسابی اومده، از «+ › برداشت یا واریز» گزینه‌ی «قرض دادم/گرفتم» رو بزن تا موجودی حساب هم درست بشه. اینجا فقط ثبت می‌شه.</p>`}
       <div class="btnrow"><button class="btn wide" id="dsave">${d ? 'ذخیره‌ی تغییرات' : 'ثبت'}</button>${d ? `<button class="btn danger" id="ddel">حذف</button>` : ''}</div>`;
     openSheet(d ? 'ویرایش' : 'بدهی یا طلب جدید', html, ov => {
-      if (locked) { $$('#dirr input, #dqty', ov).forEach(i => { i.readOnly = true; }); $('#dsrc', ov).addEventListener('click', () => { closeAll(); setTimeout(() => openTxForm(d.src.op ? { op: d.src.op } : { id: d.src.tx }), 280); }); }
-      $('#ddir', ov).addEventListener('click', e => { const b = e.target.closest('[data-d]'); if (!b || b.disabled) return; dir = b.dataset.d; $$('#ddir .chip', ov).forEach(c => { c.classList.toggle('on', c === b); c.setAttribute('aria-pressed', c === b); }); });
-      const curTotal = () => locked ? d.amount : asset === 'irr' ? readAmount(ov, 'damount') : (V.parseQty($('#dqty', ov).value, asset) || 0);
+      if (locked) { $$('#dirr input, #dqty, [name=drial]', ov).forEach(i => { i.readOnly = true; }); rialDirty = true;
+        $('#dsrc', ov).addEventListener('click', () => { closeAll(); setTimeout(() => openTxForm(p0.src.op ? { op: p0.src.op } : { id: p0.src.tx }), 280); }); }
+      const seg = (wrap, b) => $$('.chip', wrap).forEach(c => { c.classList.toggle('on', c === b); c.setAttribute('aria-pressed', c === b); });
+      const curTotal = () => !single ? d.amount : locked ? d.amount : asset === 'irr' ? readAmount(ov, 'damount') : (V.parseQty($('#dqty', ov).value, asset) || 0);
+      const curDate = () => single ? readDate(ov, 'ddate') : d.date;
       const updSched = bindSched(ov, 'd', () => asset, curTotal);
-      ov.addEventListener('input', e => { if (e.target.classList.contains('qtyin')) e.target.value = C.normDigits(e.target.value).replace(/[^\d.٫]/g, '').replace('.', '٫').replace(/٫(?=.*٫)/g, ''); });
+      const resetRecQ = bindRec(ov, 'd', () => asset, () => single ? curTotal() : 0);
+      function updRial() {
+        if (!single || asset === 'irr' || !$('[name=drial]', ov)) return;
+        const auto = Flow.rialAuto(S, asset, curTotal(), curDate());
+        if (!rialDirty) setAmt(ov, 'drial', auto);
+        $('#drialhint', ov).innerHTML = locked ? 'از همون تراکنش.' : rialHintTxt(asset, curDate(), auto);
+      }
+      // «اضافه به بدهی فعلی» فقط برای مورد تازه
+      function updJoin() {
+        const w = $('#djoinw', ov); if (!w) return;
+        const m = matchDebt(dir, $('#dperson', ov).value, asset, ret);
+        joinId = m && joinSel !== 'sep' ? m.id : '';
+        w.innerHTML = m ? `<p class="lbl">با «${esc(m.person)}» از قبل یه مورد باز هم‌نوع داری</p><div class="chips seg" id="djoin" role="group" aria-label="اضافه به مورد فعلی یا جدا">
+          <button type="button" class="chip ${joinId ? 'on' : ''}" data-j="join" aria-pressed="${!!joinId}">اضافه به همون (مانده ${esc(debtQty(m, debtLeft(m)))})</button>
+          <button type="button" class="chip ${joinId ? '' : 'on'}" data-j="sep" aria-pressed="${!joinId}">مورد جدا</button></div>
+          <p class="hint">${joinId ? 'یه قرض دیگه به همون مورد اضافه می‌شه؛ پرداخت‌ها از قدیمی‌ترین قرض کم می‌شن. موعد و تکرارِ همون مورد می‌مونه.' : 'یه مورد جدا با موعد و تکرار خودش ساخته می‌شه.'}</p>` : '';
+        $('#dschedw', ov).hidden = !!joinId; $('#drecw', ov).hidden = !!joinId;
+      }
+      ov.addEventListener('click', e => {
+        const j = e.target.closest('#djoin [data-j]'); if (j) { joinSel = j.dataset.j; updJoin(); return; }
+        const r = e.target.closest('#dret [data-r]');
+        if (r) { ret = r.dataset.r; seg($('#dret', ov), r); $('#drethint', ov).textContent = retHint(ret); if ($('#dropt', ov)) $('#dropt', ov).textContent = ret === 'rial' ? '' : '(اختیاری)'; updJoin(); return; }
+        if (e.target.closest('[data-setdate]')) setTimeout(updRial, 0);
+      });
+      $('#ddir', ov).addEventListener('click', e => { const b = e.target.closest('[data-d]'); if (!b || b.disabled) return; dir = b.dataset.d; seg($('#ddir', ov), b); updJoin(); });
+      ov.addEventListener('input', e => {
+        if (e.target.classList.contains('qtyin')) e.target.value = C.normDigits(e.target.value).replace(/[^\d.٫]/g, '').replace('.', '٫').replace(/٫(?=.*٫)/g, '');
+        if (e.target.name === 'drial') { rialDirty = !!e.target.value.trim(); return; }
+        if (e.target.id === 'dperson') { updJoin(); return; }
+        updRial();
+      });
+      ov.addEventListener('change', e => { if (e.target.name !== 'drial') updRial(); });
       $('#dasset', ov).addEventListener('click', e => { const b = e.target.closest('[data-a]'); if (!b || b.disabled) return; asset = b.dataset.a;
-        $('#dpamtw', ov).innerHTML = planAmtField('d', asset, 0); $$('#dpamtw input.amt', ov).forEach(bindAmount); updSched();
-        $$('#dasset .chip', ov).forEach(c => { c.classList.toggle('on', c === b); c.setAttribute('aria-pressed', c === b); });
-        $('#dirr', ov).hidden = asset !== 'irr'; $('#dqw', ov).hidden = asset === 'irr';
-        if (asset !== 'irr') $('#dqlbl', ov).textContent = `مقدار (${window.Inv.faUnit(asset)})`; });
+        $('#dpamtw', ov).innerHTML = planAmtField('d', asset, 0); $$('#dpamtw input.amt', ov).forEach(bindAmount); updSched(); if (resetRecQ) resetRecQ();
+        seg($('#dasset', ov), b);
+        if ($('#dirr', ov)) { $('#dirr', ov).hidden = asset !== 'irr'; $('#dqw', ov).hidden = asset === 'irr'; }
+        $('#dretw', ov).hidden = asset === 'irr'; if ($('#drialw', ov)) $('#drialw', ov).hidden = asset === 'irr';
+        if (asset !== 'irr' && $('#dqlbl', ov)) $('#dqlbl', ov).textContent = `مقدار (${window.Inv.faUnit(asset)})`;
+        rialDirty = false; updRial(); updJoin(); });
+      updRial(); updJoin();
       if (!d && !person) setTimeout(() => { const i = $('#dperson', ov); if (i) i.focus(); }, 300);
       once($('#dsave', ov), () => {
-        const person = $('#dperson', ov).value.trim();
-        const amount = locked ? d.amount : asset === 'irr' ? readAmount(ov, 'damount') : V.parseQty($('#dqty', ov).value, asset);
-        if (!person || !amount) { toast(asset === 'irr' ? 'نام شخص و مبلغ لازمه.' : 'نام شخص و مقدار لازمه.', 'bad'); return false; }
+        const name = $('#dperson', ov).value.trim();
+        const amount = curTotal();
+        if (!name || !amount) { toast(asset === 'irr' ? 'نام شخص و مبلغ لازمه.' : 'نام شخص و مقدار لازمه.', 'bad'); return false; }
         if (d && d.settles.length && asset !== dAsset(d)) { toast('این مورد تسویه‌ی ثبت‌شده داره؛ واحدش رو نمی‌شه عوض کرد.', 'bad'); return false; }
+        const isR = ret === 'rial' && asset !== 'irr';
+        const r = single && asset !== 'irr' ? (locked ? (typeof p0.r === 'number' ? p0.r : null) : readAmount(ov, 'drial') || null) : null;
+        if (isR && single && !r) { toast(locked ? 'معادل ریالی این قرض رو از همون تراکنش «قرض گرفتم/دادم» وارد کن.' : 'معادل ریالی روز رو وارد کن؛ این مورد به معادل ریالی برمی‌گرده.', 'bad'); return false; }
+        if (isR && !single && parts.some(x => typeof x.r !== 'number')) { toast('برای «معادل ریالی»، معادل همه‌ی قرض‌های این مورد لازمه؛ از جزئیات روی هر قرض بزن و معادلش رو وارد کن.', 'bad'); return false; }
+        const date = curDate();
+        const target = !d && joinId ? S.debts.find(x => x.id === joinId) : null;
+        if (target) {
+          Flow.ensureParts(target).push({ id: uid(), date, q: amount, r: asset === 'irr' ? null : r });
+          Flow.settleDebt(target, date);
+          save(); closeAll(); obTab = 'debt'; render(); toast(`به «${debtTitle(target)}» اضافه شد.`); return;
+        }
         const sch = readSched(ov, 'd', asset);
         if (sch.mode === 'plan' && !sch.plan.amount) { toast('مبلغ هر قسط رو وارد کن.', 'bad'); return false; }
+        const R = readRec(ov, 'd', asset, single ? amount : 0); if (R && R.err) { toast(R.err, 'bad'); return false; }
         const rec = d || { id: uid(), settles: [] }, wasSched = !!(d && (d.due || d.plan));
-        Object.assign(rec, { dir, person, amount, asset, date: readDate(ov, 'ddate'), due: sch.due, note: $('#dnote', ov).value.trim() });
+        Object.assign(rec, { dir, person: name, asset, date, due: sch.due, note: $('#dnote', ov).value.trim() });
+        if (isR) rec.ret = 'rial'; else delete rec.ret;
         if (sch.plan) rec.plan = sch.plan; else delete rec.plan;
         if (rec.due || rec.plan) { if (!wasSched || !rec.sched) rec.sched = d ? today() : rec.date; } else delete rec.sched;
-        if (debtLeft(rec) > 0) delete rec.closed; else if (!rec.closed) rec.closed = today();
+        if (!d) rec.parts = [{ id: uid(), date, q: amount, r: asset === 'irr' ? null : r }];
+        else if (single && !locked) Object.assign(p0, { date, q: amount, r: asset === 'irr' ? null : r });
+        if (R) rec.rec = Object.assign({}, R, { skip: d && d.rec ? d.rec.skip || [] : [] }, d && d.rec && d.rec.acc ? { acc: d.rec.acc } : {}); else delete rec.rec;
         if (!d) S.debts.push(rec);
+        Flow.settleDebt(rec, today());
         save(); closeAll(); obTab = 'debt'; render(); toast(d ? 'ذخیره شد.' : 'ثبت شد.');
       });
       if (d) $('#ddel', ov).addEventListener('click', () => {
-        if (!confirm(`«${debtTitle(d)}» حذف بشه؟${locked ? ` تراکنش «${dir === 'owed' ? 'قرض دادم' : 'قرض گرفتم'}» که ساختتش هم حذف می‌شه.` : ''}`)) return;
-        if (locked) { const r = Flow.remove(S, d.src); if (r.err) { toast(r.err, 'bad'); return; } }
-        S.tx.forEach(t => { if (t.debt === d.id) delete t.debt; });
-        S.ops.forEach(o => { if (o.debt === d.id) delete o.debt; });
-        S.debts = S.debts.filter(x => x.id !== d.id); save(); closeAll(); render(); toast('حذف شد.');
+        const n = parts.filter(srcOf).length;
+        if (!confirm(`«${debtTitle(d)}» حذف بشه؟${n ? ` ${n > 1 ? `${faDigits(n)} تراکنش` : 'تراکنش'} «${dir === 'owed' ? 'قرض دادم' : 'قرض گرفتم'}» که ساختنش هم حذف می‌شه.` : ''}`)) return;
+        if (!deleteDebt(d)) return;
+        save(); closeAll(); render(); toast('حذف شد.');
       });
     });
   }
@@ -2117,13 +2294,22 @@
   function openDebtDetail(id) {
     const d = S.debts.find(x => x.id === id); if (!d) return;
     const left = debtLeft(d), verb = d.dir === 'owe' ? 'پرداخت' : 'دریافت';
-    const isIrr = dAsset(d) === 'irr';
-    const src = d.src && Flow.collect(S, d.src);
+    const isIrr = dAsset(d) === 'irr', rialRet = C.isRialRet(d), R = C.debtReplay(d), parts = Flow.ensureParts(d);
+    const src = parts.length === 1 && parts[0].src && Flow.collect(S, parts[0].src) ? parts[0].src : null;
     const refOf = x => x.txId ? { tx: x.txId } : x.opId ? { op: x.opId } : null;
-    const hist = (d.settles || []).map((x, i) => `<li><span>${dateFull(x.date)}${x.opId ? ' <small class="dval">در دارایی</small>' : ''}</span><b>${isIrr ? money(x.amount) : esc(debtQty(d, x.amount))}</b><button class="iconbtn sm" data-undo="${i}" aria-label="حذف این ${verb}">${IC.x}</button></li>`).join('');
+    const two = (q, r) => `${esc(debtQty(d, q))} <small class="dval dline">یا ${r === null ? '—' : money(r)}</small>`;
+    const hist = (d.settles || []).map((x, i) => `<li><span>${dateFull(x.date)}${x.opId ? ' <small class="dval">در دارایی</small>' : ''}</span><b>${typeof x.r === 'number' && rialRet ? `${money(x.r)} <small class="dval">(${esc(debtQty(d, x.amount))})</small>` : isIrr ? money(x.amount) : esc(debtQty(d, x.amount))}</b><button class="iconbtn sm" data-undo="${i}" aria-label="حذف این ${verb}">${IC.x}</button></li>`).join('');
+    // فهرست قرض‌ها (بخش‌ها): وقتی بیش از یکیه، یا معادل ریالی داره، یا تکراریه
+    const showParts = parts.length > 1 || rialRet || !!d.rec || (!isIrr && parts.some(x => typeof x.r === 'number'));
+    const pst = x => x.status === 'paid' ? (d.dir === 'owe' ? 'پرداخت شد' : 'دریافت شد') : x.status === 'partial' ? `${pct(1 - x.f)} تسویه شده` : 'باز';
+    const partsHtml = showParts ? `<h3 class="subh">قرض‌ها</h3><ul class="inst parts">${R.parts.map((x, i) => `<li class="${x.status === 'paid' ? 'paid' : x.status === 'partial' ? 'part' : ''}"><button data-part="${esc(x.id)}">
+        <span class="n">${faDigits(i + 1)}</span><span>${dateFull(x.date)}، ${esc(debtQty(d, x.q))}${isIrr ? '' : x.r === null ? ' <small class="dval dline">بدون معادل</small>' : ` <small class="dval dline">معادل ${money(x.r)}</small>`}${x.rec ? ' <small class="dval">(تکراری)</small>' : ''}</span><em>${pst(x)}</em></button></li>`).join('')}</ul>` : '';
+    const recDue = d.rec ? C.debtRecDue(d, monthEnd(ym(today()))) : [], recNext = d.rec ? C.debtRecNext(d) : null;
+    const recHtml = d.rec ? `<h3 class="subh">تکرار ماهانه</h3><p class="note">هر ماه روز ${faDigits(d.rec.day || C.jParse(d.rec.first).d)}، ${esc(debtQty(d, d.rec.q))}، از ${dateTitle(d.rec.first)}، ${recEndTxt(d.rec)}. ${recNext ? `نوبت بعدی: ${dateTitle(recNext.due)}.` : 'همه‌ی نوبت‌ها ثبت شده.'}</p>
+      ${recDue.map(o => `<button class="btn wide ghost" data-recdue="${esc(o.due)}">${IC.check}ثبت نوبت ${dateTitle(o.due)}</button>`).join('')}` : '';
     const html = `
-      <div class="sums"><div class="sum"><span>${isIrr ? 'کل مبلغ' : 'کل مقدار'}</span><b>${debtShow(d, d.amount)}</b></div><div class="sum"><span>باقی‌مانده</span><b class="${left > 0 ? (d.dir === 'owe' ? 'neg' : 'pos') : ''}">${debtShow(d, Math.max(left, 0))}</b></div></div>
-      <p class="note">از ${dateFull(d.date)}${d.due ? `، موعد ${dateFull(d.due)}` : ''}${d.plan ? `، قسطی: هر ماه ${esc(debtQty(d, d.plan.amount))} از ${dateTitle(d.plan.first)}` : ''}${d.note ? `، ${esc(d.note)}` : ''}</p>
+      <div class="sums"><div class="sum"><span>${isIrr ? 'کل مبلغ' : 'کل مقدار'}</span><b>${rialRet ? two(d.amount, R.totalR) : debtShow(d, d.amount)}</b></div><div class="sum"><span>باقی‌مانده</span><b class="${left > 0 ? (d.dir === 'owe' ? 'neg' : 'pos') : ''}">${rialRet ? two(left, R.leftR) : debtShow(d, left)}</b></div></div>
+      <p class="note">از ${dateFull(d.date)}${isIrr ? '' : `، ${retName(d)}`}${d.due ? `، موعد ${dateFull(d.due)}` : ''}${d.plan ? `، قسطی: هر ماه ${esc(debtQty(d, d.plan.amount))} از ${dateTitle(d.plan.first)}` : ''}${d.note ? `، ${esc(d.note)}` : ''}</p>
       ${(() => { const sc = C.debtSchedule(d, today());
         if (sc.mode === 'date' && sc.next && sc.next.status === 'late') return `<p class="alert">موعد ${dateFull(d.due)} گذشته و ${esc(debtQty(d, left))} هنوز ${d.dir === 'owe' ? 'پرداخت' : 'دریافت'} نشده.</p>`;
         if (sc.mode !== 'plan') return '';
@@ -2131,9 +2317,12 @@
           : it.status === 'missed' ? (d.dir === 'owe' ? 'پرداخت نشد' : 'دریافت نشد') : it.status === 'late' ? (it.paidQ ? `عقب‌افتاده، ${esc(debtQty(d, it.paidQ, false))} پرداخت شده` : 'عقب‌افتاده') : it.paidQ ? `${esc(debtQty(d, it.paidQ, false))} پرداخت شده` : '';
         return `<h3 class="subh">اقساط</h3><ul class="inst">${sc.items.map(it => `<li class="${it.status === 'paid' ? 'paid' : it.status === 'late' ? 'late' : it.status === 'partial' || it.status === 'missed' ? 'part' : ''}"><button data-dinst="${it.i}" ${it.status === 'paid' || it.status === 'partial' || it.status === 'missed' ? 'disabled' : ''}>
           <span class="n">${faDigits(it.i + 1)}</span><span>${dateFull(it.due)}، ${esc(debtQty(d, it.amount))}</span><em>${st(it)}</em></button></li>`).join('')}</ul>`; })()}
+      ${partsHtml}
+      ${recHtml}
       ${src ? `<p class="note">با تراکنش «${d.dir === 'owed' ? 'قرض دادم' : 'قرض گرفتم'}» ثبت شده. <button type="button" class="linkbtn" id="dsrc">دیدن تراکنش</button></p>` : ''}
       ${left > 0 ? `<button class="btn wide" id="settle">${IC.check}ثبت ${verb}</button>
-        <p class="hint">از هر حساب یا صرافی و با هر دارایی‌ای. اگه با دارایی دیگه‌ای ${verb} شده، با قیمت همون روز به ${isIrr ? 'تومان' : 'واحد همین مورد'} تبدیل و کم می‌شه.</p>` : ''}
+        <p class="hint">${rialRet ? `با ${esc(V.ASSETS[dAsset(d)].name)}${PEG_OF(dAsset(d)) ? ` (یا ${esc(V.ASSETS[PEG_OF(dAsset(d))].name)}، یک‌به‌یک)` : ''} از مقدار کم می‌شه؛ با تومان یا دارایی دیگه (با ارزش همون روز) از معادل ریالی. هر دو از قدیمی‌ترین قرض.`
+          : `از هر حساب یا صرافی و با هر دارایی‌ای. اگه با دارایی دیگه‌ای ${verb} شده، با قیمت همون روز به ${isIrr ? 'تومان' : 'واحد همین مورد'} تبدیل و کم می‌شه${PEG_OF(dAsset(d)) ? `؛ ${esc(V.ASSETS[PEG_OF(dAsset(d))].name)} یک‌به‌یک` : ''}.`}</p>` : ''}
       ${hist ? `<h3 class="subh">سابقه‌ی ${verb}‌ها</h3><ul class="settles">${hist}</ul>` : ''}
       <button class="btn wide ghost" id="dedit">ویرایش</button>`;
     openSheet(debtTitle(d), html, ov => {
@@ -2141,8 +2330,10 @@
         closeSheet(ov);
         setTimeout(() => openTxForm({ kind: d.dir === 'owe' ? 'out' : 'in', why: d.dir === 'owe' ? 'repay' : 'collect', preset: { debt: d.id, asset: dAsset(d), q: left, acc: defSettleAcc(d) } }), 280);
       });
-      if (src) $('#dsrc', ov).addEventListener('click', () => { closeSheet(ov); setTimeout(() => openTxForm(d.src.op ? { op: d.src.op } : { id: d.src.tx }), 280); });
+      if (src) $('#dsrc', ov).addEventListener('click', () => { closeSheet(ov); setTimeout(() => openTxForm(src.op ? { op: src.op } : { id: src.tx }), 280); });
       $$('[data-dinst]', ov).forEach(b => b.addEventListener('click', () => { closeSheet(ov); setTimeout(() => openDebtPay(d.id, b.dataset.dinst), 280); }));
+      $$('[data-part]', ov).forEach(b => b.addEventListener('click', () => { closeSheet(ov); setTimeout(() => openPartEdit(d.id, b.dataset.part), 280); }));
+      $$('[data-recdue]', ov).forEach(b => b.addEventListener('click', () => { closeSheet(ov); setTimeout(() => openRecConfirm(d.id, b.dataset.recdue), 280); }));
       $$('[data-undo]', ov).forEach(b => b.addEventListener('click', () => {
         if (!confirm(`این ${verb} حذف بشه؟`)) return;
         const x = d.settles[+b.dataset.undo], r = x && refOf(x);
@@ -2151,11 +2342,102 @@
           d.settles.splice(+b.dataset.undo, 1);
           if (x && x.txId) S.tx = S.tx.filter(t => t.id !== x.txId);
           if (x && x.opId) S.ops = S.ops.filter(o => o.id !== x.opId);
-          if (debtLeft(d) > 0) delete d.closed;
+          Flow.settleDebt(d);
         }
         save(); closeSheet(ov); render(); setTimeout(() => openDebtDetail(d.id), 280);
       }));
       $('#dedit', ov).addEventListener('click', () => openDebtForm(d.id));
+    });
+  }
+  const PEG_OF = a => a === 'usd' ? 'usdt' : a === 'usdt' ? 'usd' : null;
+  // ویرایش یک قرض (بخش) از یک بدهی/طلب؛ قرضی که با «قرض گرفتم/دادم» ساخته شده، از همون فرم ویرایش می‌شه
+  function openPartEdit(id, pid) {
+    const d = S.debts.find(x => x.id === id); if (!d) return;
+    const p = Flow.ensureParts(d).find(x => x.id === pid); if (!p) return;
+    if (p.src && Flow.collect(S, p.src)) { openTxForm(p.src.op ? { op: p.src.op } : { id: p.src.tx }); return; }
+    const a = dAsset(d), rialRet = C.isRialRet(d);
+    let dirty = typeof p.r === 'number';
+    const html = `<p class="note">${esc(debtTitle(d))}${a === 'irr' ? '' : `، ${retName(d)}`}${p.rec ? `، نوبت ${dateTitle(p.rec)} از تکرار ماهانه` : ''}</p>
+      <label class="lbl">${a === 'irr' ? 'مبلغ' : 'مقدار'}</label>${qtyFieldAny('pq', a, p.q)}
+      ${a === 'irr' ? '' : `<label class="lbl">معادل ریالی روز ${rialRet ? '' : '<small>(اختیاری)</small>'}</label>${amountInput('pr', typeof p.r === 'number' ? p.r : 0)}<p class="hint" id="prhint"></p>`}
+      <label class="lbl">تاریخ</label>${dateField('pdate', p.date, true)}
+      <div class="btnrow"><button class="btn wide" id="psave">ذخیره</button><button class="btn danger" id="pdel">حذف</button></div>`;
+    openSheet('قرض ' + dateTitle(p.date), html, ov => {
+      const upd = () => { if (a === 'irr') return; const date = readDate(ov, 'pdate'), auto = Flow.rialAuto(S, a, qtyInputVal(ov, 'pq', a), date);
+        if (!dirty) setAmt(ov, 'pr', auto); $('#prhint', ov).innerHTML = rialHintTxt(a, date, auto); };
+      ov.addEventListener('input', e => { if (e.target.classList.contains('qtyin')) e.target.value = C.normDigits(e.target.value).replace(/[^\d.٫]/g, '').replace('.', '٫').replace(/٫(?=.*٫)/g, '');
+        if (e.target.name === 'pr') { dirty = !!e.target.value.trim(); return; } upd(); });
+      ov.addEventListener('change', e => { if (e.target.name !== 'pr') upd(); });
+      ov.addEventListener('click', e => { if (e.target.closest('[data-setdate]')) setTimeout(upd, 0); });
+      upd();
+      once($('#psave', ov), () => {
+        const q = qtyInputVal(ov, 'pq', a), r = a === 'irr' ? null : readAmount(ov, 'pr') || null;
+        if (!q) { toast(a === 'irr' ? 'مبلغ رو وارد کن.' : 'مقدار رو وارد کن.', 'bad'); return false; }
+        if (rialRet && !r) { toast('معادل ریالی روز لازمه؛ این مورد به معادل ریالی برمی‌گرده.', 'bad'); return false; }
+        Object.assign(p, { q, r, date: readDate(ov, 'pdate') });
+        Flow.settleDebt(d);
+        save(); closeAll(); render(); toast('ذخیره شد.'); setTimeout(() => openDebtDetail(d.id), 280);
+      });
+      $('#pdel', ov).addEventListener('click', () => {
+        if (d.parts.length === 1) {
+          if (!confirm(`این تنها قرضِ «${debtTitle(d)}» است؛ کل مورد حذف بشه؟`)) return;
+          if (!deleteDebt(d)) return;
+          save(); closeAll(); render(); toast('حذف شد.'); return;
+        }
+        if (!confirm(`این قرض (${dateTitle(p.date)}، ${debtQty(d, p.q)}) حذف بشه؟${p.rec ? ' نوبتش دوباره در «پیش رو» میاد.' : ''}`)) return;
+        d.parts = d.parts.filter(x => x !== p); Flow.settleDebt(d);
+        save(); closeAll(); render(); toast('حذف شد.'); setTimeout(() => openDebtDetail(d.id), 280);
+      });
+    });
+  }
+  // تأیید یک نوبت قرض تکرارشونده: معادل ریالی همون روز، و «فقط ثبت» یا «اضافه به حساب» (هر بار انتخاب)
+  function openRecConfirm(id, key) {
+    const d = S.debts.find(x => x.id === id); if (!d || !d.rec) return;
+    const a = dAsset(d), rialRet = C.isRialRet(d), owe = d.dir === 'owe', R = d.rec;
+    if (Flow.ensureParts(d).some(p => p.rec === key)) { openDebtDetail(id); return; }
+    let mode = R.acc && Flow.place(S, R.acc) ? 'acc' : 'rec', dirty = false;
+    const html = `<p class="note">نوبت ${dateFull(key)}، ${esc(debtTitle(d))}${a === 'irr' ? '' : `، ${retName(d)}`}</p>
+      <label class="lbl">${a === 'irr' ? 'مبلغ' : 'مقدار'}</label>${qtyFieldAny('rq', a, R.q)}
+      ${a === 'irr' ? '' : `<label class="lbl">معادل ریالی روز ${rialRet ? '' : '<small>(اختیاری)</small>'}</label>${amountInput('rr', 0)}<p class="hint" id="rrhint"></p>`}
+      <label class="lbl">تاریخ</label>${dateField('rdate', key, true)}
+      <p class="lbl">موجودی حساب</p><div class="chips seg" id="rmode" role="group" aria-label="فقط ثبت یا اضافه به حساب">
+        <button type="button" class="chip ${mode === 'rec' ? 'on' : ''}" data-m="rec" aria-pressed="${mode === 'rec'}">فقط ثبت</button>
+        <button type="button" class="chip ${mode === 'acc' ? 'on' : ''}" data-m="acc" aria-pressed="${mode === 'acc'}">${owe ? 'اضافه به حساب' : 'کم از حساب'}</button></div>
+      <div id="raccw" ${mode === 'acc' ? '' : 'hidden'}><label class="lbl" for="racc">${owe ? 'به کدوم حساب اومد؟' : 'از کدوم حساب رفت؟'}</label><select id="racc">${placeOptions(R.acc || '', { none: false })}</select></div>
+      <div class="btnrow"><button class="btn wide" id="rsave">${IC.check}ثبت</button><button class="btn ghost" id="rskip">این نوبت نبود</button></div>`;
+    openSheet(recName(d), html, ov => {
+      const upd = () => { if (a === 'irr') return; const date = readDate(ov, 'rdate'), auto = Flow.rialAuto(S, a, qtyInputVal(ov, 'rq', a), date);
+        if (!dirty) setAmt(ov, 'rr', auto); $('#rrhint', ov).innerHTML = rialHintTxt(a, date, auto); };
+      ov.addEventListener('input', e => { if (e.target.classList.contains('qtyin')) e.target.value = C.normDigits(e.target.value).replace(/[^\d.٫]/g, '').replace('.', '٫').replace(/٫(?=.*٫)/g, '');
+        if (e.target.name === 'rr') { dirty = !!e.target.value.trim(); return; } upd(); });
+      ov.addEventListener('change', e => { if (e.target.name !== 'rr' && e.target.id !== 'racc') upd(); });
+      ov.addEventListener('click', e => {
+        if (e.target.closest('[data-setdate]')) setTimeout(upd, 0);
+        const b = e.target.closest('#rmode [data-m]'); if (!b) return;
+        mode = b.dataset.m; $$('#rmode .chip', ov).forEach(c => { c.classList.toggle('on', c === b); c.setAttribute('aria-pressed', c === b); }); $('#raccw', ov).hidden = mode !== 'acc';
+      });
+      upd();
+      once($('#rsave', ov), () => {
+        const q = qtyInputVal(ov, 'rq', a), r = a === 'irr' ? null : readAmount(ov, 'rr') || null, date = readDate(ov, 'rdate');
+        if (!q) { toast(a === 'irr' ? 'مبلغ رو وارد کن.' : 'مقدار رو وارد کن.', 'bad'); return false; }
+        if (rialRet && !r) { toast('معادل ریالی روز لازمه؛ این مورد به معادل ریالی برمی‌گرده.', 'bad'); return false; }
+        if (mode === 'acc') {
+          const acc = $('#racc', ov).value;
+          if (!acc || acc.startsWith('__')) { toast('حساب رو انتخاب کن.', 'bad'); return false; }
+          const res = Flow.save(S, { kind: owe ? 'in' : 'out', why: owe ? 'borrow' : 'lend', acc, asset: a, q, value: r, date, person: d.person, ret: retKey(d), joinDebt: d.id, recKey: key, note: '' }, null, { uid, now: () => Date.now() });
+          if (res.err) { toast(res.err, 'bad'); return false; }
+          d.rec.acc = acc; const dd = S.debts.find(x => x.id === d.id); if (dd && dd.rec) dd.rec.acc = acc;
+        } else {
+          Flow.ensureParts(d).push({ id: uid(), date, q, r, rec: key });
+          Flow.settleDebt(d, date);
+          delete d.rec.acc;
+        }
+        save(); closeAll(); refreshSheets(); render(); toast(`نوبت ${dateTitle(key)} ثبت شد.`);
+      });
+      $('#rskip', ov).addEventListener('click', () => {
+        if (!confirm(`نوبت ${dateTitle(key)} ثبت نشه؟ دیگه در «پیش رو» نمیاد.`)) return;
+        d.rec.skip = (d.rec.skip || []).concat(key); save(); closeAll(); refreshSheets(); render(); toast('رد شد.');
+      });
     });
   }
 
@@ -2243,6 +2525,7 @@
     for (let i = 0; i <= 12; i++) obs = obs.concat(C.incomesForMonth(S, C.addYm(cur, i), map).filter(o => !o.paid && o.due >= t).map(o => ({ ...o, name: 'دریافت ' + o.name })));
     const lim = C.addYm(cur, 12);
     allDebtItems().filter(o => !o.paid && o.due >= t && ym(o.due) <= lim).forEach(o => obs.push(o));
+    recItems(monthEnd(lim)).filter(o => o.due >= t).forEach(o => obs.push(o));
     return obs.sort((a, b) => a.due.localeCompare(b.due));
   }
   const SHORTCUT_NAME = 'Vault Calendar';

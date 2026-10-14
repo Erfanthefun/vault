@@ -70,8 +70,11 @@ with sync_playwright() as p:
     pg.click('.card[data-act=debtp]:has-text("علی")'); wait(450)
     pg.click('.sheet [data-act=newdebt]'); wait(500)
     check('person sheet → new debt form prefilled with the person, direction owe', pg.input_value('#dperson') == 'علی' and 'on' in pg.get_attribute('#ddir [data-d=owe]', 'class'))
+    check('form offers «اضافه به همون» for the open toman debt (default on)', 'on' in pg.get_attribute('#djoin [data-j=join]', 'class'))
     pg.fill('.sheet [name=damount]', '10000000'); pg.click('#dsave'); closed()
-    check('new record joins the same person card', len(pg.query_selector_all('.card[data-act=debtp]:has-text("علی")')) == 1 and '۳ مورد' in pg.inner_text('.card[data-act=debtp]:has-text("علی")'))
+    a1 = next(x for x in S()['debts'] if x['id'] == 'a1')
+    check('new loan joined the open toman debt as a second part (v15)', len(a1['parts']) == 2 and a1['amount'] == 2100000000, a1)
+    check('person card still one card, 2 records', len(pg.query_selector_all('.card[data-act=debtp]:has-text("علی")')) == 1 and '۲ مورد' in pg.inner_text('.card[data-act=debtp]:has-text("علی")'))
     # یک‌مورده: مستقیم جزئیات
     pg.click('.card[data-act=debtp]:has-text("مامان")'); wait(500)
     check('single-record person opens the record detail directly', pg.is_visible('#settle') and pg.inner_text('.sheet-head h2') == 'بدهکار به مامان')

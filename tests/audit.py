@@ -32,7 +32,9 @@ with sync_playwright() as p:
           s.debts.push({ id: 'dg', dir: 'owed', person: 'علی', asset: 'gold', amount: 5000, date: J.today(), due: null, note: '', settles: [{ amount: 2000, date: J.today() }] },
             { id: 'db', dir: 'owe', person: 'سارا', asset: 'btc', amount: 1000000, date: J.today(), due: null, note: '', settles: [] },
             { id: 'db2', dir: 'owe', person: 'سارا', asset: 'irr', amount: 20000000, date: J.today(), due: null, note: '', settles: [] },
-            { id: 'db3', dir: 'owe', person: 'مامان', asset: 'irr', amount: 50000000, date: J.today(), due: null, note: '', settles: [] });
+            { id: 'db3', dir: 'owe', person: 'مامان', asset: 'irr', amount: 50000000, date: J.today(), due: null, note: '', settles: [] },
+            { id: 'dh', dir: 'owe', person: 'حسین', asset: 'usd', ret: 'rial', date: J.addMonths(J.today(), -2), due: null, note: '', settles: [{ amount: 0, r: 50000000, date: J.today() }],
+              parts: [{ id: 'h1', date: J.addMonths(J.today(), -2), q: 3000, r: 80000000 }, { id: 'h2', date: J.addMonths(J.today(), -1), q: 3000, r: 85000000 }], rec: { q: 3000, first: J.today(), day: +J.today().slice(8), skip: [] } });
           localStorage.setItem('vault-v1', JSON.stringify(s)); })()"""); pg.reload(); pg.wait_for_timeout(500)
         views = [('home', lambda: pg.click('[data-tab=home]')), ('tx', lambda: pg.click('[data-tab=tx]')),
                  ('plan-income', lambda: (pg.click('[data-tab=ob]'), pg.click('[data-act=obt][data-t=income]'))),
@@ -61,6 +63,20 @@ with sync_playwright() as p:
         pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
         pg.click('.card.debt:has-text("علی")'); pg.wait_for_timeout(450); audit(pg, f'{scheme}:sheet-debt-detail')
         pg.click('#settle'); pg.wait_for_timeout(700); audit(pg, f'{scheme}:sheet-debt-settle-form')
+        pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
+        # نسخه‌ی ۱۵ (مرحله‌ی ۲): جزئیات «معادل ریالی» با قرض‌ها و تکرار، ویرایش قرض، تأیید نوبت، فرم با روش برگشت و تکرار
+        pg.click('.card.debt:has-text("حسین")'); pg.wait_for_timeout(450); audit(pg, f'{scheme}:sheet-debt-rial-detail')
+        pg.click('.sheet .parts li:first-child button'); pg.wait_for_timeout(500); audit(pg, f'{scheme}:sheet-debt-part')
+        pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
+        pg.click('[data-tab=home]'); pg.wait_for_timeout(250); pg.click('.ob-body:has-text("قرض ماهانه")'); pg.wait_for_timeout(500)
+        pg.click('#rmode [data-m=acc]'); pg.wait_for_timeout(150); audit(pg, f'{scheme}:sheet-rec-confirm')
+        pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
+        pg.click('[data-tab=ob]'); pg.click('[data-act=obt][data-t=debt]'); pg.wait_for_timeout(250)
+        pg.click('[data-act=newdebt][data-dir=owe] >> nth=-1'); pg.wait_for_timeout(450); pg.fill('#dperson', 'حسین'); pg.click('#dasset [data-a=usd]'); pg.click('#dret [data-r=rial]'); pg.wait_for_timeout(200)
+        pg.click('#djoin [data-j=sep]'); pg.click('#drecon'); pg.wait_for_timeout(200); audit(pg, f'{scheme}:sheet-debt-form-rial-rec')
+        pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
+        pg.evaluate("App.openTx({ kind: 'in', why: 'borrow' })"); pg.wait_for_timeout(500); pg.fill('#tperson', 'حسین'); pg.click('#tasset [data-a=usd]'); pg.wait_for_timeout(250); pg.click('#tret [data-r=rial]'); pg.wait_for_timeout(250)
+        audit(pg, f'{scheme}:sheet-tx-borrow-rial')
         pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
         # نسخه‌ی ۱۵: برگه‌ی یک نفر (چند مورد)
         pg.click('.card.debt:has-text("سارا")'); pg.wait_for_timeout(450); audit(pg, f'{scheme}:sheet-debt-person')
