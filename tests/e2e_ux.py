@@ -136,8 +136,11 @@ with sync_playwright() as p:
     hub('newloan')
     pg.fill('#lname', 'اسنپ‌پی موبایل'); wait(100)
     check('bnpl: auto-detected from name', pg.get_attribute('#ltype [data-t=bnpl]', 'aria-pressed') == 'true')
-    pg.fill('.sheet [name=lamount]', '2500000'); pg.fill('#lcount', '4')
-    for part, v in (('y', '1405'), ('m', '7'), ('d', '25')): pg.select_option(f'.sheet [data-date=lfirst] [data-p={part}]', v)
+    check('bnpl: no first-installment date assumed before purchase type chosen', pg.is_hidden('#firstwrap') and pg.input_value('#lpaid') == '' and pg.is_hidden('#firsttxwrap'))
+    check('bnpl v15.3: default rest day = last day of month', pg.input_value('#lrest') == '۳۱')
+    pg.fill('.sheet [name=lamount]', '2500000'); pg.fill('#lcount', '4'); pg.fill('#lrest', '1')
+    pg.click('#lmode [data-m=online]'); wait(100)
+    for part, v in (('y', '1405'), ('m', '7'), ('d', '25')): pg.select_option(f'.sheet [data-date=lbuy] [data-p={part}]', v)
     wait(150); prev = pg.inner_text('#lprev')
     check('bnpl: live preview = user example', '۲۵ مهر، ۱ آبان، ۱ آذر، ۱ دی' in prev, prev)
     check('bnpl: first installment counted as paid by default', pg.input_value('#lpaid') == '۱' and pg.is_checked('#firsttx'))
@@ -220,7 +223,7 @@ with sync_playwright() as p:
     # خرید قسطی: پلتفرم از فهرست + فروشگاه
     hub('newloan'); pg.select_option('#llender', 'دیجی‌پی'); wait(150)
     check('bnpl: choosing a BNPL platform switches type', pg.get_attribute('#ltype [data-t=bnpl]', 'aria-pressed') == 'true' and pg.is_visible('#lstore'))
-    pg.fill('#lstore', 'دیجی‌کالا'); pg.fill('.sheet [name=lamount]', '1200000'); pg.fill('#lcount', '4'); pg.click('#lsave'); closed()
+    pg.fill('#lstore', 'دیجی‌کالا'); pg.fill('.sheet [name=lamount]', '1200000'); pg.fill('#lcount', '4'); pg.click('#lmode [data-m=online]'); pg.click('#lsave'); closed()
     L = [l for l in S()['loans'] if l.get('store') == 'دیجی‌کالا'][0]
     check('bnpl: name from platform + store', L['name'] == 'دیجی‌پی، دیجی‌کالا' and L['lender'] == 'دیجی‌پی' and L['restDay'] == 5)
     check('bnpl: card shows platform & store', 'دیجی‌پی، دیجی‌کالا' in pg.inner_text('#view'))

@@ -195,13 +195,21 @@
     const r = rateFn(u); return r ? Math.round(l.amount * r) : 0;
   }
   function txAmountMap(state) { const m = new Map(); for (const t of state.tx) m.set(t.id, t.amount); return m; }
-  // سررسید قسط i: وام بانکی = هر ماه همون روزِ قسط اول. خرید قسطی (restDay): قسط اول روز خرید، بقیه روز restDay ماه‌های بعد
+  // سررسید قسط i: وام بانکی = هر ماه همون روزِ قسط اول. خرید قسطی (restDay): قسط اول = loan.first (سررسید قسط اول، نه لزوماً روز خرید؛ تاریخ خرید در loan.buy)، بقیه روز restDay ماه‌های بعد
   function loanDue(loan, i) {
     if (loan.restDay && i > 0) {
       const [y, m] = addYm(ym(loan.first), i).split('/').map(Number);
       return jStr(y, m, Math.min(loan.restDay, monthLen(y, m)));
     }
     return addMonths(loan.first, i, jParse(loan.first).d);
+  }
+  // نسخه‌ی ۱۵٫۳: سررسید قسط اول خرید قسطی از روی تاریخ خرید. آنلاین = همون لحظه‌ی خرید؛ حضوری = روز آخرِ همون ماه
+  // (۳۱، ۳۰ یا ۲۹؛ اگه خرید خودش روز آخر ماه باشه، همون روز). نوع نامعلوم = null (هیچ پیش‌فرضی فرض نمی‌شه)
+  function bnplFirstDue(buy, mode) {
+    if (!/^\d{4}\/\d{2}\/\d{2}$/.test(buy || '')) return null;
+    if (mode === 'online') return buy;
+    if (mode === 'store') { const { y, m } = jParse(buy); return jStr(y, m, monthLen(y, m)); }
+    return null;
   }
 
   // هر تعهد: amount = مبلغ واقعی اگه پرداخت شده، وگرنه مبلغ اسمی/پیش‌بینی
@@ -707,7 +715,7 @@
   }
 
   root.Core = { toJ, toG, today, ym, addMonths, addYm, addDays, diffDays, monthLen, jParse, jStr, pad,
-    MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomeMatches, incomesForMonth, openObligations, monthStats, loanDue, loanSummary,
+    MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomeMatches, incomesForMonth, openObligations, monthStats, loanDue, bnplFirstDue, loanSummary,
     ymIndex, monthOutflow, cashFlow, txAccountDelta, afterAnchor, accountBalance, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis,
     setRate, loanAmt, unitOf, debtMode, debtSchedule, debtFlow, settleRial, loanRecvRial, DEBT_GRACE,
     debtParts, isRialRet, debtReplay, debtRecalc, debtRialOf, debtRecDue, debtRecNext,

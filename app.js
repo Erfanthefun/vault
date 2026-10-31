@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۱۵٫۲';
+  const VERSION = '۱۵٫۳';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -734,8 +734,8 @@
           <div><span>مانده‌ی بدهی</span><b>${C.unitOf(l) === 'irr' ? money(s.remainingAmount, false) : esc(loanQty(l, s.remainingQty))}</b></div>
           <div><span>${s.next ? 'قسط بعدی' : 'وضعیت'}</span><b class="${s.next && s.next.due < today() ? 'neg' : ''}">${s.next ? dateTitle(s.next.due) : 'تسویه شد'}</b></div>
         </div>
-        ${s.remainingCount ? `<p class="lc-end">آخرین قسط: ${dateFull(s.last)}${l.restDay ? `، اقساط روز ${faDigits(l.restDay)} هر ماه` : ''}</p>` : ''}
-        ${l.restDay ? `<span class="tag info">خرید قسطی</span>` : ''}
+        ${s.remainingCount ? `<p class="lc-end">آخرین قسط: ${dateFull(s.last)}${l.restDay ? (l.restDay >= 31 ? '، اقساط آخر هر ماه' : `، اقساط روز ${faDigits(l.restDay)} هر ماه`) : ''}</p>` : ''}
+        ${l.restDay ? `<span class="tag info">خرید قسطی${l.mode === 'online' ? '، آنلاین' : l.mode === 'store' ? '، حضوری' : ''}</span>` : ''}
       </button></li>`;
     };
     const activeL = S.loans.filter(l => C.loanSummary(l).remainingCount > 0), doneL = S.loans.filter(l => C.loanSummary(l).remainingCount <= 0);
@@ -1180,7 +1180,7 @@
     ${listEditor('bnpl', 'پلتفرم‌های خرید قسطی', 'توی فرم خرید قسطی به‌عنوان «پلتفرم» پیشنهاد می‌شن.')}
     ${listEditor('lenders', 'وام‌دهنده‌ها', 'توی فرم وام بانکی به‌عنوان «وام‌دهنده» پیشنهاد می‌شن.')}
     <section class="block card-block"><h2>خرید قسطی (اسنپ‌پی، دیجی‌پی…)</h2>
-      <p class="note">قسط اول روز خرید پرداخت می‌شه و اقساط بعدی روز ثابتی از ماه‌های بعد. معمولاً روز ۱. این عدد برای خریدهای قسطی جدید پیش‌فرض می‌شه و توی فرم هر خرید قابل تغییره.</p>
+      <p class="note">قسط اول خرید آنلاین همون لحظه‌ی خرید پرداخت می‌شه و قسط اول خرید حضوری روز آخرِ ماه خرید. اقساط بعدی روز ثابتی از ماه‌های بعدن، معمولاً روز آخر ماه (۳۱ یعنی روز آخر هر ماه، حتی ماه‌های ۳۰ و ۲۹ روزه). این عدد برای خریدهای قسطی جدید پیش‌فرض می‌شه و توی فرم هر خرید قابل تغییره.</p>
       <div class="unitwrap"><input id="bnplday" inputmode="numeric" value="${faDigits(bnplDay())}" aria-label="روز سررسید اقساط بعدی"><span>روز ماه</span></div>
       <button class="btn small" data-act="savebnpl">ذخیره</button></section>
     ${window.Inv ? window.Inv.settingsHtml() : ''}
@@ -1824,7 +1824,7 @@
   // ---------- وام ----------
   // نوع اقساط: وام بانکی (هر ماه همون روز) یا خرید قسطی (قسط اول روز خرید، بقیه روز ثابتی از ماه‌های بعد)
   const BNPL_RE = /(اسنپ\s*‌?\s*پی|دیجی\s*‌?\s*پی|تارا|ازکی|لندو|قسطی|bnpl|snapp\s*pay|digi\s*pay)/i;
-  const bnplDay = () => S.settings.bnplDay || 1;
+  const bnplDay = () => S.settings.bnplDay || 31; // ۳۱ = روز آخر هر ماه (سررسید معمول اسنپ‌پی و دیجی‌پی)
   // یک فهرست با دو گروه؛ گروه نوعِ فعلی اول. انتخاب از گروه دیگه، نوع رو عوض می‌کنه.
   const lenderOptions = (list, sel) => {
     const grp = (k, label) => { const items = (S.lists[k] || []).slice(); if (k === list && sel && !items.includes(sel) && !(S.lists.bnpl || []).concat(S.lists.lenders || []).includes(sel)) items.unshift(sel);
@@ -1835,6 +1835,9 @@
   function openLoanForm(id) {
     const l = id ? S.loans.find(x => x.id === id) : null;
     let type = l ? (l.restDay ? 'bnpl' : 'bank') : 'bank', typeTouched = !!l;
+    // نوع خرید قسطی: آنلاین (قسط اول لحظه‌ی خرید) یا حضوری (قسط اول آخر همون ماه). خریدهای قبلی بی‌نوع می‌مونن تا کاربر خودش تعیین کنه
+    let mode = l && (l.mode === 'online' || l.mode === 'store') ? l.mode : '', firstTouched = false;
+    const MODES = [['online', 'آنلاین'], ['store', 'حضوری']];
     const R = l && l.recv ? l.recv : null;
     const LU = TX_ASSETS.filter(a => a !== 'bar');
     let unit = l ? C.unitOf(l) : 'irr', rasset = R ? R.asset || 'irr' : 'irr';
@@ -1850,8 +1853,11 @@
       <div id="lunitwrap"><p class="lbl">واحد اقساط</p>${chipsOf('lunit', unit, 'u')}</div>
       <label class="lbl">مبلغ هر قسط</label><div id="lamtw">${lAmtField()}</div>
       <label class="lbl" for="lcount">تعداد کل اقساط</label><input id="lcount" inputmode="numeric" value="${l ? faDigits(l.count) : ''}" placeholder="مثلاً ۴">
-      <label class="lbl" id="lfirstlbl">تاریخ</label>${dateField('lfirst', l ? l.first : today())}
-      <div id="restwrap"><label class="lbl" for="lrest">اقساط بعدی روز چندم ماه‌ان؟</label><input id="lrest" inputmode="numeric" value="${faDigits(l && l.restDay ? l.restDay : bnplDay())}"></div>
+      <div id="modewrap"><p class="lbl" id="lmodelbl">نوع خرید</p><div class="chips seg" id="lmode" role="group" aria-labelledby="lmodelbl">${MODES.map(([k, n]) => `<button type="button" class="chip ${mode === k ? 'on' : ''}" data-m="${k}" aria-pressed="${mode === k}">${n}</button>`).join('')}</div>
+        <p class="note" id="lmodenote"></p>
+        <label class="lbl">تاریخ خرید</label>${dateField('lbuy', l ? (l.buy || l.first) : today())}</div>
+      <div id="firstwrap"><label class="lbl" id="lfirstlbl">تاریخ</label>${dateField('lfirst', l ? l.first : today())}</div>
+      <div id="restwrap"><label class="lbl" for="lrest">اقساط بعدی روز چندم ماه‌ان؟ <span class="was">(۳۱ یعنی روز آخر هر ماه)</span></label><input id="lrest" inputmode="numeric" value="${faDigits(l && l.restDay ? l.restDay : bnplDay())}"></div>
       <p class="summary" id="lprev" aria-live="polite"></p>
       <div id="recvwrap"><label class="check"><input type="checkbox" id="lrecv" ${R ? 'checked' : ''}> مبلغ وام به حسابم واریز شد</label>
         <div id="recvbox" ${R ? '' : 'hidden'}>
@@ -1863,13 +1869,19 @@
         </div></div>
       <label class="lbl" for="lcat">دسته‌ی خرج</label><select id="lcat">${withSel(['وام', ...S.categories.expense.filter(c => c !== 'وام')], l && l.cat).map(c => `<option ${c === ((l && l.cat) || 'وام') ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
       ${!l ? `<label class="lbl" for="lpaid">چند قسط تا حالا پرداخت شده؟</label><input id="lpaid" inputmode="numeric" placeholder="۰">
-        <label class="check" id="firsttxwrap"><input type="checkbox" id="firsttx"> برداشت قسط اول (روز خرید) رو هم در تراکنش‌ها ثبت کن</label>` : ''}
+        <label class="check" id="firsttxwrap"><input type="checkbox" id="firsttx"> <span id="firsttxlbl">برداشت قسط اول رو هم در تراکنش‌ها ثبت کن</span></label>` : ''}
       <div class="btnrow"><button class="btn wide" id="lsave">${l ? 'ذخیره‌ی تغییرات' : 'افزودن'}</button>${l ? `<button class="btn danger" id="ldel">حذف</button>` : ''}</div>`;
     openSheet(l ? `ویرایش ${l.name}` : 'وام یا خرید قسطی جدید', html, ov => {
       const draft = () => ({ first: readDate(ov, 'lfirst'), count: Math.min(600, readInt($('#lcount', ov)) || 0), restDay: type === 'bnpl' ? Math.min(31, Math.max(1, readInt($('#lrest', ov)) || 1)) : undefined });
       const sync = () => {
         $$('#ltype .chip', ov).forEach(c => { c.classList.toggle('on', c.dataset.t === type); c.setAttribute('aria-pressed', c.dataset.t === type); });
-        $('#lfirstlbl', ov).textContent = type === 'bnpl' ? 'تاریخ خرید (قسط اول همون روزه)' : 'تاریخ سررسید اولین قسط';
+        $$('#lmode .chip', ov).forEach(c => { c.classList.toggle('on', c.dataset.m === mode); c.setAttribute('aria-pressed', c.dataset.m === mode); });
+        $('#lfirstlbl', ov).textContent = type === 'bnpl' ? 'تاریخ سررسید قسط اول' : 'تاریخ سررسید اولین قسط';
+        $('#lmodenote', ov).textContent = mode === 'online' ? 'خرید آنلاین: قسط اول همون لحظه‌ی خرید پرداخت می‌شه.'
+          : mode === 'store' ? 'خرید حضوری: روز خرید پولی پرداخت نمی‌شه؛ قسط اول روز آخرِ همون ماه سررسید می‌شه.'
+          : l ? 'نوع این خرید ثبت نشده؛ تاریخ قسط اول همونیه که قبلاً ثبت شده. اگه بخوای، نوعش رو انتخاب کن.' : 'آنلاین یا حضوری؟ تاریخ قسط اول از روی همین تعیین می‌شه.';
+        $('#modewrap', ov).hidden = type !== 'bnpl';
+        $('#firstwrap', ov).hidden = type === 'bnpl' && !mode && !l; // خرید تازه: تا نوع خرید معلوم نشده، تاریخ قسط اول حدس زده نمی‌شه
         $('#restwrap', ov).hidden = type !== 'bnpl'; $('#storewrap', ov).hidden = type !== 'bnpl';
         const ls = $('#llender', ov), want = type === 'bnpl' ? 'bnpl' : 'lenders';
         if (ls.dataset.list !== want) { const keep = ls.value; ls.dataset.list = want; ls.innerHTML = lenderOptions(want, keep === '__newlender' ? '' : keep); }
@@ -1877,20 +1889,28 @@
         $('#recvwrap', ov).hidden = type !== 'bank'; $('#recvbox', ov).hidden = !$('#lrecv', ov).checked; $('#lunitwrap', ov).hidden = type !== 'bank';
         if (type !== 'bank' && unit !== 'irr') { unit = 'irr'; $('#lamtw', ov).innerHTML = lAmtField(); $$('#lamtw input.amt', ov).forEach(bindAmount); $$('#lunit .chip', ov).forEach(c => { c.classList.toggle('on', c.dataset.u === 'irr'); c.setAttribute('aria-pressed', c.dataset.u === 'irr'); }); }
         if (!l) {
-          $('#firsttxwrap', ov).hidden = type !== 'bnpl';
-          if (type === 'bnpl' && !$('#lpaid', ov).dataset.touched) $('#lpaid', ov).value = '۱';
-          if (type === 'bank' && !$('#lpaid', ov).dataset.touched) $('#lpaid', ov).value = '';
-          const recent = C.diffDays(readDate(ov, 'lfirst'), today()) <= 7;
-          if (!$('#firsttx', ov).dataset.touched) $('#firsttx', ov).checked = type === 'bnpl' && recent;
+          $('#firsttxwrap', ov).hidden = type !== 'bnpl' || !mode;
+          $('#firsttxlbl', ov).textContent = mode === 'online' ? 'برداشت قسط اول (روز خرید) رو هم در تراکنش‌ها ثبت کن' : 'برداشت قسط اول رو هم در تراکنش‌ها ثبت کن';
+          // فقط خرید آنلاین قسط اولش موقع خرید پرداخت شده؛ حضوری و نامعلوم = هیچی پرداخت نشده
+          if (!$('#lpaid', ov).dataset.touched) $('#lpaid', ov).value = type === 'bnpl' && mode === 'online' ? '۱' : '';
+          const recent = C.diffDays(readDate(ov, 'lbuy'), today()) <= 7;
+          if (!$('#firsttx', ov).dataset.touched) $('#firsttx', ov).checked = type === 'bnpl' && mode === 'online' && recent;
         }
         const d = draft(), box = $('#lprev', ov);
-        if (!d.count) { box.textContent = type === 'bnpl' ? 'قسط اول روز خرید؛ اقساط بعدی روز ' + faDigits(d.restDay || bnplDay()) + ' ماه‌های بعد.' : 'اقساط بعدی هر ماه همین روز؛ اگه ماهی این روز رو نداشت، آخرین روز همون ماه.'; return; }
+        if (type === 'bnpl' && !mode && !l) { box.textContent = ''; return; }
+        const restTxt = (d.restDay || bnplDay()) >= 31 ? 'روز آخر ماه‌های بعد' : 'روز ' + faDigits(d.restDay || bnplDay()) + ' ماه‌های بعد';
+        if (!d.count) { box.textContent = type === 'bnpl' ? `قسط اول ${mode === 'store' ? 'آخر ماه خرید' : mode === 'online' ? 'روز خرید' : 'در تاریخ بالا'}؛ اقساط بعدی ${restTxt}.` : 'اقساط بعدی هر ماه همین روز؛ اگه ماهی این روز رو نداشت، آخرین روز همون ماه.'; return; }
         const r = { ...d }, dates = [];
         for (let i = 0; i < d.count; i++) dates.push(C.loanDue(r, i));
         const show = dates.length <= 5 ? dates : dates.slice(0, 3).concat(['…', dates[dates.length - 1]]);
         box.innerHTML = `<b>تاریخ اقساط:</b> ${show.map(x => x === '…' ? '…' : dateTitle(x)).join('، ')}`;
       };
-      $('#ltype', ov).addEventListener('click', e => { const b = e.target.closest('[data-t]'); if (!b) return; type = b.dataset.t; typeTouched = true; sync(); });
+      $('#ltype', ov).addEventListener('click', e => { const b = e.target.closest('[data-t]'); if (!b) return; type = b.dataset.t; typeTouched = true; autoFirst(); sync(); });
+      // تاریخ قسط اول از روی نوع و تاریخ خرید پر می‌شه، مگه این‌که کاربر خودش دستش زده باشه. موقع باز کردن خرید قبلی چیزی عوض نمی‌شه
+      const autoFirst = () => { if (type !== 'bnpl' || !mode || firstTouched) return; const f = C.bnplFirstDue(readDate(ov, 'lbuy'), mode); if (f) setDate(ov, 'lfirst', f); };
+      $('#lmode', ov).addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b) return; mode = b.dataset.m; autoFirst(); sync(); });
+      $('[data-date="lbuy"]', ov).addEventListener('change', () => { autoFirst(); sync(); });
+      $('[data-date="lfirst"]', ov).addEventListener('change', () => { firstTouched = true; });
       const pick = (wrap, b) => $$('.chip', wrap).forEach(c => { c.classList.toggle('on', c === b); c.setAttribute('aria-pressed', c === b); });
       $('#lunit', ov).addEventListener('click', e => { const b = e.target.closest('[data-u]'); if (!b || b.dataset.u === unit) return;
         if (l && Object.keys(l.paid || {}).length && C.unitOf(l) !== b.dataset.u) { toast('این وام قسط پرداخت‌شده داره؛ واحد اقساطش رو نمی‌شه عوض کرد.', 'bad'); return; }
@@ -1909,7 +1929,7 @@
         if ((S.lists.bnpl || []).includes(v) && type !== 'bnpl') { type = 'bnpl'; typeTouched = true; sync(); }
         else if ((S.lists.lenders || []).includes(v) && !(S.lists.bnpl || []).includes(v) && type !== 'bank') { type = 'bank'; typeTouched = true; sync(); }
       });
-      if (!l) { $('#lpaid', ov).addEventListener('input', e => { e.target.dataset.touched = '1'; }); $('#firsttx', ov).addEventListener('change', e => { e.target.dataset.touched = '1'; }); }
+      if (!l) { $('#lpaid', ov).addEventListener('input', e => { e.target.dataset.touched = '1'; }); $('#firsttx', ov).addEventListener('input', e => { e.target.dataset.touched = '1'; }); $('#firsttx', ov).addEventListener('change', e => { e.target.dataset.touched = '1'; }); }
       ov.addEventListener('input', sync); ov.addEventListener('change', e => { if (e.target.closest('[data-date="lfirst"]') || e.target.id === 'lrest') sync(); });
       $$('[data-setdate]', ov).forEach(b => b.addEventListener('click', () => setTimeout(sync, 0)));
       sync();
@@ -1918,6 +1938,9 @@
         const name = ($('#lname', ov).value.trim() || (type === 'bnpl' ? [lender, store].filter(Boolean).join('، ') : '')).slice(0, 60);
         const amount = readQ('lamount', unit), count = readInt($('#lcount', ov));
         if (!name || !amount || !count || count > 600) { toast(type === 'bnpl' ? 'پلتفرم یا نام، مبلغ قسط و تعداد اقساط (۱ تا ۶۰۰) لازمه.' : 'نام، مبلغ قسط و تعداد اقساط (۱ تا ۶۰۰) لازمه.', 'bad'); return false; }
+        const buy = readDate(ov, 'lbuy');
+        if (type === 'bnpl' && !mode && !l) { toast('نوع خرید رو انتخاب کن: آنلاین یا حضوری.', 'bad'); return false; }
+        if (type === 'bnpl' && readDate(ov, 'lfirst') < buy) { toast('تاریخ قسط اول نمی‌تونه قبل از تاریخ خرید باشه.', 'bad'); return false; }
         const recvOn = type === 'bank' && $('#lrecv', ov).checked;
         const recv = recvOn ? { asset: rasset, amount: readQ('lrecvamt', rasset), account: $('#lrecvacc', ov).value, date: readDate(ov, 'lrecvdate') } : null;
         if (recv && (!recv.amount || !recv.account || recv.account.startsWith('__'))) { toast('برای واریز وام، مبلغ دریافتی و حساب لازمه.', 'bad'); return false; }
@@ -1928,13 +1951,17 @@
         if (type === 'bank' && unit !== 'irr') rec.unit = unit; else delete rec.unit;
         if (store) rec.store = store; else delete rec.store;
         if (d.restDay) rec.restDay = d.restDay; else delete rec.restDay;
+        // تاریخ خرید فقط وقتی ذخیره می‌شه که با قسط اول فرق داره یا نوع خرید معلومه (خرید قبلیِ دست‌نخورده همون‌طور می‌مونه)
+        if (type === 'bnpl' && mode) rec.mode = mode; else delete rec.mode;
+        if (type === 'bnpl' && (mode || buy !== d.first)) rec.buy = buy; else delete rec.buy;
         if (!l) {
           const pc = Math.min(count, readInt($('#lpaid', ov)));
           for (let i = 0; i < pc; i++) rec.paid[i] = { date: C.loanDue(rec, i), prior: true };
-          if (type === 'bnpl' && pc >= 1 && $('#firsttx', ov).checked) { // قسط اول روز خرید: برداشتش هم ثبت بشه
-            const t = { id: uid(), created: Date.now(), type: 'expense', amount, date: rec.first, time: '', cat: rec.cat,
+          if (type === 'bnpl' && mode && pc >= 1 && $('#firsttx', ov).checked) { // قسط اول پرداخت‌شده: برداشتش هم ثبت بشه
+            const pd = mode === 'online' || rec.first <= today() ? rec.first : today(); // آنلاین = لحظه‌ی خرید؛ حضوریِ زودتر از سررسید پرداخت‌شده = امروز
+            const t = { id: uid(), created: Date.now(), type: 'expense', amount, date: pd, time: '', cat: rec.cat,
               account: '', note: `${name}، قسط ۱ از ${faDigits(count)}`, link: { kind: 'loan', id: rec.id, key: '0' }, auto: true };
-            S.tx.push(t); rec.paid[0] = { date: rec.first, txId: t.id };
+            S.tx.push(t); rec.paid[0] = { date: pd, txId: t.id };
           }
           S.loans.push(rec);
         }
@@ -2495,9 +2522,9 @@
       const vals = months.map(m => exp.filter(t => ym(t.date) === m && catOf(t) === c).reduce((s, t) => s + t.amount, 0));
       return [c].concat(vals, [vals.reduce((a, b) => a + b, 0)]);
     })), 'خرج هر دسته', [18].concat(months.map(() => 14), [16]));
-    add([['نام', 'نوع', 'بانک/سرویس', 'مبلغ قسط (ریال)', 'تعداد کل', 'پرداخت‌شده', 'باقی‌مانده', 'مانده‌ی بدهی (ریال)', 'اولین قسط', 'آخرین قسط', 'قسط بعدی']]
-      .concat(S.loans.map(l => { const s = C.loanSummary(l); return [l.name, l.restDay ? `خرید قسطی (روز ${l.restDay})` : 'وام بانکی', l.lender || '', C.unitOf(l) === 'irr' ? l.amount : loanQty(l, l.amount), l.count, s.paidCount, s.remainingCount, s.remainingAmount, l.first, s.last, s.next ? s.next.due : 'تسویه']; })),
-      'وام‌ها', [22, 16, 16, 16, 9, 10, 10, 18, 12, 12, 12]);
+    add([['نام', 'نوع', 'بانک/سرویس', 'مبلغ قسط (ریال)', 'تعداد کل', 'پرداخت‌شده', 'باقی‌مانده', 'مانده‌ی بدهی (ریال)', 'تاریخ خرید', 'اولین قسط', 'آخرین قسط', 'قسط بعدی']]
+      .concat(S.loans.map(l => { const s = C.loanSummary(l); return [l.name, l.restDay ? `خرید قسطی${l.mode === 'online' ? ' آنلاین' : l.mode === 'store' ? ' حضوری' : ''} (${l.restDay >= 31 ? 'آخر ماه' : `روز ${l.restDay}`})` : 'وام بانکی', l.lender || '', C.unitOf(l) === 'irr' ? l.amount : loanQty(l, l.amount), l.count, s.paidCount, s.remainingCount, s.remainingAmount, l.restDay ? (l.buy || l.first) : '', l.first, s.last, s.next ? s.next.due : 'تسویه']; })),
+      'وام‌ها', [22, 26, 16, 16, 9, 10, 10, 18, 12, 12, 12, 12]);
     add([['عنوان', 'نوع', 'مبلغ ماهانه/پیش‌بینی (ریال)', 'روز سررسید', 'از ماه', 'تا ماه']].concat(S.fixed.map(f => [f.name, f.variable ? 'متغیر' : 'ثابت', f.amount, f.day, f.start || '', f.end || ''])),
       'پرداخت‌های ماهانه', [26, 8, 22, 11, 10, 10]);
     const xq = (d, q) => dAsset(d) === 'irr' ? q : Number(window.Inv.plainQty(q, dAsset(d)));

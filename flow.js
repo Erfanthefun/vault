@@ -487,7 +487,7 @@
         if (!fresh && (l.unit || undefined) !== unit && Object.keys(l.paid || {}).length) return { err: 'این وام قسط پرداخت‌شده داره؛ واحد اقساطش رو نمی‌شه عوض کرد.' };
         Object.assign(l, { name: L.name, lender: L.lender, amount: L.amount, count: L.count, first: L.first, cat: L.cat || 'وام' });
         if (unit) l.unit = unit; else delete l.unit;
-        delete l.restDay; delete l.store;
+        delete l.restDay; delete l.store; delete l.buy; delete l.mode;
         l.paid = l.paid || {};
         for (const k of Object.keys(l.paid)) if (+k >= l.count) {
           const pi = l.paid[k]; delete l.paid[k];

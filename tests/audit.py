@@ -53,12 +53,15 @@ with sync_playwright() as p:
             pg.evaluate(js); pg.wait_for_timeout(450); audit(pg, f'{scheme}:sheet-{n}'); pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
         for n, act in [('newloan', 'newloan'), ('newfixed', 'newfixed'), ('newincome', 'newincome'), ('opchooser', 'opchooser'), ('prices', 'prices')]:
             pg.click('.tabbar .addbtn'); pg.wait_for_timeout(300); pg.click(f'.hubtile[data-act={act}]'); pg.wait_for_timeout(500); audit(pg, f'{scheme}:sheet-{n}')
+            if n == 'newloan':  # نسخه‌ی ۱۵٫۳: خرید قسطی، قبل و بعد از انتخاب آنلاین/حضوری
+                pg.click('#ltype [data-t=bnpl]'); pg.wait_for_timeout(250); audit(pg, f'{scheme}:sheet-bnpl-notype')
+                pg.click('#lmode [data-m=store]'); pg.wait_for_timeout(250); audit(pg, f'{scheme}:sheet-bnpl-store')
             pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
         for t in ('buy', 'sell', 'swap', 'transfer', 'gift_in', 'open'):
             pg.evaluate(f"window.Inv.openOp('{t}')"); pg.wait_for_timeout(450); audit(pg, f'{scheme}:op-{t}')
             pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
         pg.click('[data-tab=ob]'); pg.click('[data-act=obt][data-t=debt]'); pg.wait_for_timeout(250)
-        pg.click('[data-act=newdebt][data-dir=owe] >> nth=-1'); pg.wait_for_timeout(450); pg.click('#dasset [data-a=gold]'); audit(pg, f'{scheme}:sheet-debt-form')
+        pg.click('[data-act=newdebt][data-dir=owe] >> nth=-1'); pg.wait_for_timeout(450); pg.click('#dasset [data-a=gold]'); pg.wait_for_timeout(250); audit(pg, f'{scheme}:sheet-debt-form')
         pg.click('#dmode [data-m=plan]'); pg.wait_for_timeout(200); audit(pg, f'{scheme}:sheet-debt-form-plan')
         pg.evaluate("document.querySelectorAll('.overlay').forEach(o => o.remove()); document.body.classList.remove('locked')")
         pg.click('.card.debt:has-text("علی")'); pg.wait_for_timeout(450); audit(pg, f'{scheme}:sheet-debt-detail')

@@ -1,12 +1,15 @@
 #!/bin/bash
 # همه‌ی تست‌ها: هسته‌ها و دستیار قیمت (node) + end-to-end بخش مالی، سرمایه، رابط و قیمت خودکار (Playwright)
 cd "$(dirname "$0")/.."
+# تاریخ ثابت ۲۲ مهر ۱۴۰۵ برای تست‌های مرورگر (چند تست قدیمی به «امروز» وابسته‌ان)؛ با VAULT_NOW= خالی، تاریخ واقعی
+export VAULT_NOW="${VAULT_NOW-1791966600000}" PYTHONPATH="$PWD/tests/clock${PYTHONPATH:+:$PYTHONPATH}"
 node tests/core.test.js || exit 1
 node tests/invest.test.js || exit 1
 node tests/feed.test.js || exit 1
 node tests/flow.test.js || exit 1
 node tests/v14.test.js || exit 1
 node tests/v15.test.js || exit 1
+node tests/v153.test.js || exit 1
 python3 tests/css_check.py index.html || exit 1
 python3 -m http.server 8767 >/dev/null 2>&1 & SRV=$!
 sleep 1
@@ -24,7 +27,8 @@ python3 tests/e2e_loanrecv.py; N=$?
 python3 tests/e2e_v14.py; F=$?
 python3 tests/e2e_v15.py; G=$?
 python3 tests/e2e_v15b.py; H=$?
+python3 tests/e2e_v153.py; Q=$?
 # مقایسه با نسخه‌ی قبل: اگه نسخه‌ی قبلی روی پورت ۸۷۶۸ در دسترس باشه (OLD_VERSION=۱۳ برای نسخه‌ی ۱۳)
 M=0; if curl -s -o /dev/null http://localhost:8768/index.html; then python3 tests/e2e_migrate.py; M=$?; fi
 python3 tests/audit.py; X=$?
-kill $SRV; exit $(( A || B || U || P || D || L || I || K || R || W || N || F || G || H || M || X ))
+kill $SRV; exit $(( A || B || U || P || D || L || I || K || R || W || N || F || G || H || Q || M || X ))
