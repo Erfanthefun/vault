@@ -4,7 +4,7 @@
   const C = window.Core;
   const { faNum, faDigits, today, ym, MONTHS } = C;
   const KEY = 'vault-v1'; // همون کلید Vault نسخه‌ی ۱، تا داده‌های قبلیش حفظ بشه
-  const VERSION = '۱۵٫۳';
+  const VERSION = '۱۵٫۴';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -146,29 +146,10 @@
   }
 
   // ---------- فیلدهای فرم ----------
-  function dateField(name, value, chips) {
-    const { y, m, d } = C.jParse(value || today());
-    const cy = C.jParse(today()).y;
-    let ys = ''; for (let i = Math.min(cy - 4, y); i <= Math.max(cy + 12, y); i++) ys += `<option value="${i}" ${i === y ? 'selected' : ''}>${faDigits(i)}</option>`;
-    const ms = MONTHS.map((n, i) => `<option value="${i + 1}" ${i + 1 === m ? 'selected' : ''}>${n}</option>`).join('');
-    let ds = ''; for (let i = 1; i <= 31; i++) ds += `<option value="${i}" ${i === d ? 'selected' : ''}>${faDigits(i)}</option>`;
-    return `<div class="datef" data-date="${name}">
-      <select data-p="d" aria-label="روز">${ds}</select><select data-p="m" aria-label="ماه">${ms}</select><select data-p="y" aria-label="سال">${ys}</select>
-      ${chips ? `<div class="chips mini"><button type="button" class="chip" data-setdate="0">امروز</button><button type="button" class="chip" data-setdate="-1">دیروز</button></div>` : ''}
-    </div>`;
-  }
-  function readDate(root, name) {
-    const w = $(`[data-date="${name}"]`, root);
-    const y = +$('[data-p=y]', w).value, m = +$('[data-p=m]', w).value;
-    const d = Math.min(+$('[data-p=d]', w).value, C.monthLen(y, m));
-    return C.jStr(y, m, d);
-  }
-  function setDate(root, name, js) {
-    const w = $(`[data-date="${name}"]`, root); const { y, m, d } = C.jParse(js);
-    const ysel = $('[data-p=y]', w);
-    if (![...ysel.options].some(o => +o.value === y)) ysel.insertAdjacentHTML('beforeend', `<option value="${y}">${faDigits(y)}</option>`);
-    ysel.value = y; $('[data-p=m]', w).value = m; $('[data-p=d]', w).value = d;
-  }
+  // تاریخ: دکمه + تقویم (datepick.js)؛ selectهای مخفی منبع مقدارن
+  const dateField = (name, value, chips, o) => DatePick.fieldHtml(name, value, { chips, back: 4, fwd: 12, ...o });
+  const readDate = (root, name) => DatePick.read(root, name);
+  const setDate = (root, name, js) => DatePick.set(root, name, js);
   function ymField(name, value, allowEmpty) {
     const cy = C.jParse(today()).y;
     const [y, m] = value ? value.split('/').map(Number) : [0, 0];
@@ -410,9 +391,12 @@
     requestAnimationFrame(() => requestAnimationFrame(() => ov.classList.add('open')));
     ov.addEventListener('click', e => { if (e.target === ov || e.target.closest('[data-close]')) closeSheet(ov); });
     $$('input.amt', ov).forEach(bindAmount);
-    $$('[data-setdate]', ov).forEach(b => b.addEventListener('click', () => {
-      setDate(ov, b.closest('[data-date]').dataset.date, C.addDays(today(), +b.dataset.setdate));
-    }));
+    // «امروز/دیروز»: delegate روی خود overlay تا بعد از بازرسم فرم (paint) هم کار کنه
+    ov.addEventListener('click', e => {
+      const b = e.target.closest('[data-setdate]'); if (!b || !ov.contains(b)) return;
+      const w = b.closest('[data-date]'); if (!w) return;
+      setDate(ov, w.dataset.date, C.addDays(today(), +b.dataset.setdate));
+    });
     if (mount) mount(ov);
     return ov;
   }
@@ -1330,7 +1314,7 @@
     if (creds.length) h += `<optgroup label="اعتبار خرید (تسویه آخر ماه)">${creds.map(a => accOpt(a, sel)).join('')}</optgroup>`;
     return h + `<option value="__newbank">+ حساب بانکی جدید…</option><option value="__newloc">+ صرافی یا محل نگهداری جدید…</option>`;
   }
-  const qtyField = (name, a, q) => `<div class="unitwrap"><input class="qtyin" name="${name}" inputmode="decimal" autocomplete="off" placeholder="۰" value="${q ? V.fmtQty(q, a) : ''}" aria-label="مقدار ${esc(V.ASSETS[a].name)}"><span>${esc(assetUnit(a))}</span></div>`;
+  const qtyField = (name, a, q) => `<div class="unitwrap"><input class="qtyin" name="${name}" inputmode="decimal" autocomplete="off" placeholder="۰" data-asset="${a}" value="${q ? V.fmtQtyFull(q, a) : ''}" aria-label="مقدار ${esc(V.ASSETS[a].name)}"><span>${esc(assetUnit(a))}</span></div>`;
   const piecesFld = (p, pieces) => { const w = pieces ? Object.keys(pieces)[0] : '10', c = pieces ? pieces[w] : 1;
     return `<div class="two"><div><label class="lbl" for="${p}w">وزن هر شمش</label><select id="${p}w" name="${p}w">${['5', '10', '1', '2.5', '20', '50', '100'].map(x => `<option value="${x}" ${x === String(w) ? 'selected' : ''}>${faDigits(x).replace('.', '٫')} گرم</option>`).join('')}</select></div>
       <div><label class="lbl" for="${p}c">تعداد</label><input id="${p}c" name="${p}c" class="pcs" inputmode="numeric" autocomplete="off" value="${faDigits(c)}"></div></div>`; };
@@ -1619,7 +1603,7 @@
       });
       ov.addEventListener('input', e => {
         const el = e.target;
-        if (el.classList.contains('qtyin')) el.value = C.normDigits(el.value).replace(/[^\d.٫]/g, '').replace('.', '٫').replace(/٫(?=.*٫)/g, '');
+        if (el.classList.contains('qtyin')) V.cleanQtyEl(el);
         if (el.name === 'value') valueDirty = !!el.value.trim();
         live();
       });
@@ -1856,7 +1840,7 @@
       <div id="modewrap"><p class="lbl" id="lmodelbl">نوع خرید</p><div class="chips seg" id="lmode" role="group" aria-labelledby="lmodelbl">${MODES.map(([k, n]) => `<button type="button" class="chip ${mode === k ? 'on' : ''}" data-m="${k}" aria-pressed="${mode === k}">${n}</button>`).join('')}</div>
         <p class="note" id="lmodenote"></p>
         <label class="lbl">تاریخ خرید</label>${dateField('lbuy', l ? (l.buy || l.first) : today())}</div>
-      <div id="firstwrap"><label class="lbl" id="lfirstlbl">تاریخ</label>${dateField('lfirst', l ? l.first : today())}</div>
+      <div id="firstwrap"><label class="lbl" id="lfirstlbl">تاریخ</label>${dateField('lfirst', l ? l.first : today(), false, { minFrom: 'lbuy' })}</div>
       <div id="restwrap"><label class="lbl" for="lrest">اقساط بعدی روز چندم ماه‌ان؟ <span class="was">(۳۱ یعنی روز آخر هر ماه)</span></label><input id="lrest" inputmode="numeric" value="${faDigits(l && l.restDay ? l.restDay : bnplDay())}"></div>
       <p class="summary" id="lprev" aria-live="polite"></p>
       <div id="recvwrap"><label class="check"><input type="checkbox" id="lrecv" ${R ? 'checked' : ''}> مبلغ وام به حسابم واریز شد</label>
@@ -1917,7 +1901,7 @@
         unit = b.dataset.u; pick($('#lunit', ov), b); $('#lamtw', ov).innerHTML = lAmtField(); $$('#lamtw input.amt', ov).forEach(bindAmount); sync(); });
       $('#lrasset', ov).addEventListener('click', e => { const b = e.target.closest('[data-r]'); if (!b || b.dataset.r === rasset) return;
         rasset = b.dataset.r; pick($('#lrasset', ov), b); $('#lramtw', ov).innerHTML = rAmtField(); $$('#lramtw input.amt', ov).forEach(bindAmount); });
-      ov.addEventListener('input', e => { if (e.target.classList.contains('qtyin')) e.target.value = C.normDigits(e.target.value).replace(/[^\d.٫]/g, '').replace('.', '٫').replace(/٫(?=.*٫)/g, ''); });
+      ov.addEventListener('input', e => { if (e.target.classList.contains('qtyin')) V.cleanQtyEl(e.target); });
       $('#lrecvacc', ov).addEventListener('change', e => { e.stopPropagation();
         if (e.target.value === '__newbank' || e.target.value === '__newloc') { const nb = e.target.value === '__newbank', n = (prompt(nb ? 'اسم حساب بانکی جدید:' : 'اسم صرافی یا محل نگهداری جدید:') || '').trim().slice(0, 40);
           let nid = ''; if (n) { if (nb) { const a = { id: uid(), kind: 'bank', bank: n, num: '', name: n, balance: null, stamp: '' }; S.accounts.push(a); nid = a.id; } else { const x = { id: uid(), name: n }; S.locations.push(x); nid = x.id; } save(); }
@@ -2209,7 +2193,7 @@
       <div class="chips seg wrap" id="dasset" role="group" aria-label="واحد بدهی یا طلب">${(window.Inv ? window.Inv.DEBT_ASSETS : ['irr']).map(a => `<button type="button" class="chip ${asset === a ? 'on' : ''}" data-a="${a}" aria-pressed="${asset === a}" ${lockAsset && a !== asset ? 'disabled' : ''}>${esc(V.ASSETS[a].name)}</button>`).join('')}</div>
       ${single ? `<div id="dirr" ${asset === 'irr' ? '' : 'hidden'}><label class="lbl">مبلغ</label>${amountInput('damount', d && asset === 'irr' ? d.amount : 0)}</div>
       <div id="dqw" ${asset === 'irr' ? 'hidden' : ''}><label class="lbl" for="dqty" id="dqlbl">مقدار (${esc(asset === 'irr' ? '' : window.Inv.faUnit(asset))})</label>
-        <input id="dqty" class="qtyin" inputmode="decimal" autocomplete="off" dir="ltr" value="${d && asset !== 'irr' ? esc(window.Inv.plainQty(d.amount, asset)) : ''}" placeholder="مثلاً ۵٫۲۵"></div>`
+        <input id="dqty" class="qtyin" data-asset="${asset}" inputmode="decimal" autocomplete="off" dir="ltr" value="${d && asset !== 'irr' ? esc(window.Inv.plainQty(d.amount, asset)) : ''}" placeholder="مثلاً ۵٫۲۵"></div>`
         : `<p class="note">${faDigits(parts.length)} قرض، جمعاً ${esc(debtQty(d, d.amount))}. مقدار و معادل هر قرض از جزئیات همین مورد عوض می‌شه.</p>`}
       <div id="dretw" ${asset === 'irr' ? 'hidden' : ''}>${retChips('dret', ret)}<p class="hint" id="drethint">${retHint(ret)}</p></div>
       ${single ? `<div id="drialw" ${asset === 'irr' ? 'hidden' : ''}><label class="lbl">معادل ریالی روز <small id="dropt">${ret === 'rial' ? '' : '(اختیاری)'}</small></label>${amountInput('drial', d && typeof p0.r === 'number' ? p0.r : 0)}<p class="hint" id="drialhint"></p></div>` : ''}
@@ -2254,7 +2238,7 @@
       });
       $('#ddir', ov).addEventListener('click', e => { const b = e.target.closest('[data-d]'); if (!b || b.disabled) return; dir = b.dataset.d; seg($('#ddir', ov), b); updJoin(); });
       ov.addEventListener('input', e => {
-        if (e.target.classList.contains('qtyin')) e.target.value = C.normDigits(e.target.value).replace(/[^\d.٫]/g, '').replace('.', '٫').replace(/٫(?=.*٫)/g, '');
+        if (e.target.classList.contains('qtyin')) V.cleanQtyEl(e.target);
         if (e.target.name === 'drial') { rialDirty = !!e.target.value.trim(); return; }
         if (e.target.id === 'dperson') { updJoin(); return; }
         updRial();
@@ -2392,7 +2376,7 @@
     openSheet('قرض ' + dateTitle(p.date), html, ov => {
       const upd = () => { if (a === 'irr') return; const date = readDate(ov, 'pdate'), auto = Flow.rialAuto(S, a, qtyInputVal(ov, 'pq', a), date);
         if (!dirty) setAmt(ov, 'pr', auto); $('#prhint', ov).innerHTML = rialHintTxt(a, date, auto); };
-      ov.addEventListener('input', e => { if (e.target.classList.contains('qtyin')) e.target.value = C.normDigits(e.target.value).replace(/[^\d.٫]/g, '').replace('.', '٫').replace(/٫(?=.*٫)/g, '');
+      ov.addEventListener('input', e => { if (e.target.classList.contains('qtyin')) V.cleanQtyEl(e.target);
         if (e.target.name === 'pr') { dirty = !!e.target.value.trim(); return; } upd(); });
       ov.addEventListener('change', e => { if (e.target.name !== 'pr') upd(); });
       ov.addEventListener('click', e => { if (e.target.closest('[data-setdate]')) setTimeout(upd, 0); });
@@ -2435,7 +2419,7 @@
     openSheet(recName(d), html, ov => {
       const upd = () => { if (a === 'irr') return; const date = readDate(ov, 'rdate'), auto = Flow.rialAuto(S, a, qtyInputVal(ov, 'rq', a), date);
         if (!dirty) setAmt(ov, 'rr', auto); $('#rrhint', ov).innerHTML = rialHintTxt(a, date, auto); };
-      ov.addEventListener('input', e => { if (e.target.classList.contains('qtyin')) e.target.value = C.normDigits(e.target.value).replace(/[^\d.٫]/g, '').replace('.', '٫').replace(/٫(?=.*٫)/g, '');
+      ov.addEventListener('input', e => { if (e.target.classList.contains('qtyin')) V.cleanQtyEl(e.target);
         if (e.target.name === 'rr') { dirty = !!e.target.value.trim(); return; } upd(); });
       ov.addEventListener('change', e => { if (e.target.name !== 'rr' && e.target.id !== 'racc') upd(); });
       ov.addEventListener('click', e => {

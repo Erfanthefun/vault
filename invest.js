@@ -37,6 +37,39 @@
     return (neg ? '-' : '') + J.faNum(i) + (f ? '٫' + J.faDigits(f) : '');
   }
 
+  // نمایش با همه‌ی رقم‌های اعشار ذخیره‌شده (برای فیلد ویرایش؛ مثلاً تتر تا ۶ رقم) تا ذخیره‌ی دوباره چیزی کم نکنه
+  const fmtQtyFull = (q, asset) => fmtQty(q, asset, Math.round(Math.log10(ASSETS[asset].base)));
+  // پاک‌سازی متن فیلد مقدار: ارقام فارسی/عربی → لاتین؛ «. ٫ / , ،» ممیز؛ فقط یک ممیز؛ حداکثر maxDec رقم اعشار
+  // grp=true (قیمت‌هایی مثل ۸۴,۷۳۶): «, ٬ ،» جداکننده‌ی هزارگان‌اند و حذف می‌شن؛ فقط «. ٫ /» ممیزن
+  function cleanQty(text, maxDec, grp) {
+    let s = J.normDigits(text);
+    s = grp ? s.replace(/,/g, '') : s.replace(/,/g, '.');
+    s = s.replace(/[\/٫]/g, '.').replace(/[^\d.]/g, '');
+    const k = s.indexOf('.'); if (k < 0) return s;
+    const frac = s.slice(k + 1).replace(/\./g, '').slice(0, maxDec ?? 8);
+    return (maxDec === 0 ? s.slice(0, k) : s.slice(0, k) + '٫' + frac);
+  }
+  // برای المان ورودی: دارایی (data-asset) یا data-maxdec تعداد اعشار مجاز رو می‌ده؛ data-sep="grp" یعنی «,» هزارگانه‌ست
+  function cleanQtyEl(el) {
+    const a = el.dataset.asset, md = el.dataset.maxdec;
+    const maxDec = md !== undefined && md !== '' ? +md : a && ASSETS[a] ? Math.round(Math.log10(ASSETS[a].base)) : 8;
+    const v = cleanQty(el.value, maxDec, el.dataset.sep === 'grp');
+    if (v !== el.value) el.value = v;
+  }
+  // قیمت به تومان با حداکثر ۱ رقم اعشار → ریال صحیح (۰ اگه نامعتبر). «, ٬ ،» هزارگان‌اند
+  function parseToman1(text) {
+    const s = cleanQty(text, 1, true).replace('٫', '.'); if (!s || s === '.') return 0;
+    const n = Math.round(Number(s) * 10); return Number.isSafeInteger(n) ? n : 0;
+  }
+  // متن فیلد قیمت تومانی هنگام تایپ: هزارگان در بخش صحیح + حداکثر ۱ رقم اعشار
+  function cleanToman1(text) {
+    const s = cleanQty(text, 1, true), k = s.indexOf('٫');
+    const ip = (k < 0 ? s : s.slice(0, k)).replace(/^0+(?=\d)/, '');
+    return (ip ? J.faNum(Number(ip.slice(0, 14))) : '') + (k < 0 ? '' : '٫' + J.faDigits(s.slice(k + 1)));
+  }
+  // نمایش قیمت ریالی به تومان (با اعشار در صورت وجود)
+  const tomanTxt = rial => rial % 10 ? J.faNum(Math.floor(rial / 10)) + '٫' + J.faDigits(String(rial % 10)) : J.faNum(rial / 10);
+
   // ---------- قیمت‌ها ----------
   // هر نمونه: { date, gold/silver: ریال برای هر گرم، usd/eur/usdt: ریال برای هر واحد، btc: دلار برای هر بیت‌کوین }
   // هر ثبت قیمت، قیمت‌های واردنشده رو از ثبت قبلی به ارث می‌بره؛ پس آخرین نمونه همیشه کامل‌ترینه.
@@ -341,6 +374,6 @@
     return res;
   }
 
-  root.V = { ASSETS, ORDER, PRICE_KEYS, usdRate, parseQty, fmtQty, latestPrice, priceAt, unitRial, valueRial, replay, portfolio, lens,
+  root.V = { ASSETS, ORDER, PRICE_KEYS, usdRate, parseQty, fmtQty, fmtQtyFull, cleanQty, cleanQtyEl, parseToman1, cleanToman1, tomanTxt, latestPrice, priceAt, unitRial, valueRial, replay, portfolio, lens,
     idleCash, whatIf, history, goalProgress, parsePrices, opSort, cleanFeedItem, mergeAutoPrices };
 })(typeof window !== 'undefined' ? window : globalThis);

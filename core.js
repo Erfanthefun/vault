@@ -99,6 +99,15 @@
   const MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
   const WEEKDAYS = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
   function weekday(js) { const g = toG(js); return WEEKDAYS[new Date(g.gy, g.gm - 1, g.gd).getDay()]; }
+  // شماره‌ی روز هفته با شروع شنبه: ش=۰ … ج=۶
+  const weekdayIdx = js => { const g = toG(js); return (new Date(g.gy, g.gm - 1, g.gd).getDay() + 1) % 7; };
+  // خانه‌های تقویم یک ماه (۷ ستون از شنبه): شماره‌ی روز، یا ۰ برای خانه‌ی خالی
+  function monthGrid(y, m) {
+    const cells = []; for (let i = weekdayIdx(jStr(y, m, 1)); i > 0; i--) cells.push(0);
+    for (let d = 1, n = monthLen(y, m); d <= n; d++) cells.push(d);
+    while (cells.length % 7) cells.push(0);
+    return cells;
+  }
 
   // ---------- اعداد و قالب‌بندی ----------
   function normDigits(s) {
@@ -715,7 +724,7 @@
   }
 
   root.Core = { toJ, toG, today, ym, addMonths, addYm, addDays, diffDays, monthLen, jParse, jStr, pad,
-    MONTHS, weekday, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomeMatches, incomesForMonth, openObligations, monthStats, loanDue, bnplFirstDue, loanSummary,
+    MONTHS, weekday, weekdayIdx, monthGrid, normDigits, faDigits, faNum, parseSMS, txAmountMap, obligationsForMonth, incomeMatches, incomesForMonth, openObligations, monthStats, loanDue, bnplFirstDue, loanSummary,
     ymIndex, monthOutflow, cashFlow, txAccountDelta, afterAnchor, accountBalance, categoryTotals, cumulativeByDay, debtProjection, debtFreeYm, obligationForecast, reliefWithin, onTimeRate, varianceOfVariable, kpis,
     setRate, loanAmt, unitOf, debtMode, debtSchedule, debtFlow, settleRial, loanRecvRial, DEBT_GRACE,
     debtParts, isRialRet, debtReplay, debtRecalc, debtRialOf, debtRecDue, debtRecNext,

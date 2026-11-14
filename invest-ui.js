@@ -69,30 +69,22 @@
   const stamp = ts => { const d = new Date(ts); return `${ago(J.toJ(d))}، ساعت ${faDigits(J.pad(d.getHours()) + ':' + J.pad(d.getMinutes()))}`; };
 
   // فیلدها
-  function dateField(name, value) {
-    const { y, m, d } = J.jParse(value || today()), cy = J.jParse(today()).y;
-    let ys = ''; for (let i = Math.min(cy - 10, y); i <= Math.max(cy + 1, y); i++) ys += `<option value="${i}" ${i === y ? 'selected' : ''}>${faDigits(i)}</option>`;
-    const ms = MONTHS.map((n, i) => `<option value="${i + 1}" ${i + 1 === m ? 'selected' : ''}>${n}</option>`).join('');
-    let ds = ''; for (let i = 1; i <= 31; i++) ds += `<option value="${i}" ${i === d ? 'selected' : ''}>${faDigits(i)}</option>`;
-    return `<div class="datef" data-date="${name}"><select data-p="d" aria-label="روز">${ds}</select><select data-p="m" aria-label="ماه">${ms}</select><select data-p="y" aria-label="سال">${ys}</select>
-      <div class="chips"><button type="button" class="chip" data-setdate="0">امروز</button><button type="button" class="chip" data-setdate="-1">دیروز</button></div></div>`;
-  }
-  function readDate(root, name) {
-    const w = $(`[data-date="${name}"]`, root), y = +$('[data-p=y]', w).value, m = +$('[data-p=m]', w).value;
-    return J.jStr(y, m, Math.min(+$('[data-p=d]', w).value, J.monthLen(y, m)));
-  }
+  const dateField = (name, value) => DatePick.fieldHtml(name, value, { chips: true, back: 10, fwd: 1 });
+  const readDate = (root, name) => DatePick.read(root, name);
   // مبلغ تومانی (عدد صحیح با جداکننده)
   const tomanInput = (name, rial, ph) => { const s = rial ? faNum(rial / 10) : ''; return `<div class="unitwrap"><input class="toman" name="${name}" inputmode="numeric" autocomplete="off" placeholder="${ph || '۰'}" value="${s}" aria-label="مبلغ به تومان"><span>تومان</span></div>`; };
+  // قیمت به تومان: تا ۱ رقم اعشار (ریال = تومان × ۱۰، پس صحیح می‌مونه)
+  const priceInput = (name, ph) => `<div class="unitwrap"><input class="tomanp" name="${name}" inputmode="decimal" autocomplete="off" dir="ltr" placeholder="${ph || ''}" aria-label="قیمت به تومان"><span>تومان</span></div>`;
   const readToman = (root, name) => { const v = Number(J.normDigits($(`[name="${name}"]`, root).value).replace(/\D/g, '').slice(0, 14)); return (v || 0) * 10; };
   // مقدار دارایی (اعشاری)
-  const qtyInput = (name, asset, q) => `<div class="unitwrap"><input class="qtyin" name="${name}" inputmode="decimal" autocomplete="off" placeholder="۰" value="${q ? V.fmtQty(q, asset) : ''}" data-asset="${asset}" aria-label="مقدار ${ASSETS[asset].name}"><span>${ASSETS[asset].unit}</span></div>`;
+  const qtyInput = (name, asset, q) => `<div class="unitwrap"><input class="qtyin" name="${name}" inputmode="decimal" autocomplete="off" placeholder="۰" value="${q ? V.fmtQtyFull(q, asset) : ''}" data-asset="${asset}" aria-label="مقدار ${ASSETS[asset].name}"><span>${ASSETS[asset].unit}</span></div>`;
   const readQty = (root, name, asset) => { const v = $(`[name="${name}"]`, root).value; return v.trim() ? V.parseQty(v.replace(/٬/g, ''), asset) : 0; };
   function bindInputs(root) {
     $$('input.toman', root).forEach(inp => inp.addEventListener('input', () => { const n = J.normDigits(inp.value).replace(/\D/g, '').slice(0, 14); inp.value = n ? faNum(Number(n)) : ''; }));
-    $$('input.qtyin', root).forEach(inp => inp.addEventListener('input', () => { inp.value = J.normDigits(inp.value).replace(/[^\d.٫]/g, '').replace('.', '٫').replace(/٫(?=.*٫)/g, ''); }));
+    $$('input.qtyin', root).forEach(inp => inp.addEventListener('input', () => V.cleanQtyEl(inp)));
+    $$('input.tomanp', root).forEach(inp => inp.addEventListener('input', () => { const v = V.cleanToman1(inp.value); if (v !== inp.value) inp.value = v; }));
     $$('[data-setdate]', root).forEach(b => b.addEventListener('click', () => {
-      const w = b.closest('[data-date]'), { y, m, d } = J.jParse(J.addDays(today(), +b.dataset.setdate));
-      $('[data-p=y]', w).value = y; $('[data-p=m]', w).value = m; $('[data-p=d]', w).value = d;
+      const w = b.closest('[data-date]'); DatePick.set(root, w.dataset.date, J.addDays(today(), +b.dataset.setdate));
     }));
   }
   const locOptions = (sel, filter) => S.locations.filter(filter || (() => true)).map(l => `<option value="${esc(l.id)}" ${l.id === sel ? 'selected' : ''}>${esc(l.name)}</option>`).join('') + `<option value="__new">+ محل جدید…</option>`;
@@ -293,7 +285,7 @@
     ['gold', 'گرم طلای ۱۸ عیار', 'toman'], ['usd', 'دلار', 'toman'], ['eur', 'یورو', 'toman'],
     ['usdt', 'تتر', 'toman'], ['btc', 'بیت‌کوین (به دلار)', 'usd'], ['silver', 'گرم نقره‌ی ۹۹۹', 'toman']
   ];
-  const priceText = (k, v) => v ? (k === 'btc' ? dec(v, 2) + '$' : faNum(v / 10)) : '—';
+  const priceText = (k, v) => v ? (k === 'btc' ? dec(v, 2) + '$' : V.tomanTxt(v)) : '—';
   function openPrices(pasted) {
     const P = V.latestPrice(S);
     const past = S.prices.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
@@ -303,8 +295,8 @@
       <textarea id="ptext" rows="4" placeholder="متن پیامی که قیمت‌ها توشه رو اینجا بچسبون">${esc(pasted || '')}</textarea>
       <div class="btnrow" style="margin-top:8px"><button type="button" class="btn small" id="pclip">چسباندن از کلیپ‌بورد</button><button type="button" class="btn small ghost" id="pparse">استخراج قیمت‌ها</button></div>
       ${PRICE_FIELDS.map(([k, n, u]) => `<label class="lbl">${n}${P && P[k] ? ` <span class="was">قبلی: ${priceText(k, P[k])}</span>` : ''}</label>` + (u === 'usd'
-        ? `<div class="unitwrap"><input class="qtyin" name="p_${k}" inputmode="decimal" placeholder="${P && P[k] ? dec(P[k], 2) : 'مثلاً ۸۴٬۷۳۶'}"><span>دلار</span></div>`
-        : tomanInput('p_' + k, 0, P && P[k] ? faNum(P[k] / 10) : '')).replace('placeholder="۰"', '')).join('')}
+        ? `<div class="unitwrap"><input class="qtyin" data-sep="grp" data-maxdec="2" name="p_${k}" inputmode="decimal" placeholder="${P && P[k] ? dec(P[k], 2) : 'مثلاً ۸۴٬۷۳۶'}"><span>دلار</span></div>`
+        : priceInput('p_' + k, P && P[k] ? V.tomanTxt(P[k]) : ''))).join('')}
       <label class="lbl">تاریخ</label>${dateField('pdate', today())}
       <button class="btn wide" id="psave">ثبت قیمت‌ها</button>
       ${past.length ? `<details class="fold"><summary>${IC.down}ثبت‌های قبلی</summary><ul class="ledger" style="margin-top:8px">${past.map(p => `<li class="row plain"><span class="main"><strong>${dateTitle(p.date)}${autoTag(p)}</strong>
@@ -314,8 +306,8 @@
       const fill = () => {
         const r = V.parsePrices($('#ptext', ov).value, V.latestPrice(S));
         let found = 0;
-        for (const [k, , u] of PRICE_FIELDS) if (r[k]) { $(`[name=p_${k}]`, ov).value = u === 'usd' ? dec(r[k], 2) : faNum(r[k] / 10); found++; }
-        if (r.date) { const { y, m, d } = J.jParse(r.date), w = $('[data-date=pdate]', ov); if ([...$('[data-p=y]', w).options].some(o => +o.value === y)) { $('[data-p=y]', w).value = y; $('[data-p=m]', w).value = m; $('[data-p=d]', w).value = d; } }
+        for (const [k, , u] of PRICE_FIELDS) if (r[k]) { $(`[name=p_${k}]`, ov).value = u === 'usd' ? dec(r[k], 2) : V.tomanTxt(r[k]); found++; }
+        if (r.date) { const y = J.jParse(r.date).y, w = $('[data-date=pdate]', ov); if ([...$('[data-p=y]', w).options].some(o => +o.value === y)) DatePick.set(ov, 'pdate', r.date); }
         toast(found ? `${faDigits(found)} قیمت پیدا شد${r.date ? ' (با تاریخ پیام)' : ''}. قبل از ثبت یه نگاه بنداز.` : 'قیمتی از دارایی‌های تو توی این متن پیدا نشد.', found ? '' : 'bad');
         return found;
       };
@@ -334,7 +326,7 @@
         const date = readDate(ov, 'pdate'), entered = {};
         for (const [k, , u] of PRICE_FIELDS) {
           const raw = $(`[name=p_${k}]`, ov).value.trim(); if (!raw) continue;
-          const v = u === 'usd' ? Number(J.normDigits(raw).replace(/[,٬]/g, '').replace('٫', '.')) : readToman(ov, 'p_' + k);
+          const v = u === 'usd' ? Number(J.normDigits(raw).replace(/[,٬]/g, '').replace('٫', '.')) : V.parseToman1(raw);
           if (!(v > 0)) { toast('یکی از قیمت‌ها درست وارد نشده.', 'bad'); return false; }
           entered[k] = v;
         }

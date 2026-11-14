@@ -258,6 +258,31 @@ textarea { min-height: 130px; margin-top: 12px; resize: vertical; }
 .datef { display: grid; grid-template-columns: .8fr 1.3fr 1fr; gap: 8px; }
 .datef.ym { grid-template-columns: 1.3fr 1fr; }
 .datef .chips { grid-column: 1 / -1; }
+/* تقویم انتخاب تاریخ */
+.datef.dp { display: block; position: relative; }
+.datef.dp .dsel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); opacity: 0; pointer-events: none; }
+.datebtn { width: 100%; min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-radius: 12px;
+  border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink); font-size: 1rem; font-weight: 600; text-align: start; transition: border-color 150ms, box-shadow 150ms; }
+.datebtn:focus-visible { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.datebtn .ic { width: 20px; height: 20px; flex: none; color: var(--muted); }
+.cal { padding-bottom: 6px; }
+.calhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.calnav { width: 44px; height: 44px; flex: none; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--ink); font-size: 1.5rem; line-height: 1; }
+.calnav:disabled { opacity: .35; }
+.caltitle { flex: 1; min-height: 44px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--ink); font-size: 1.05rem; font-weight: 700; text-align: center; }
+.caltitle.static { display: grid; place-items: center; }
+.calwd, .calgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.calwd span { text-align: center; font-size: .78rem; font-weight: 600; color: var(--muted); padding: 4px 0; }
+.calwd span.fri, .calday.fri { color: var(--bad); }
+.calday { min-height: 44px; aspect-ratio: 1; border: 0; border-radius: 50%; background: transparent; color: var(--ink); font-size: 1rem; font-variant-numeric: tabular-nums; }
+.calday.today { box-shadow: inset 0 0 0 2px var(--gold-hi); }
+.calday.sel { background: var(--navy); color: var(--on-navy); font-weight: 700; }
+.calday:disabled { opacity: .3; }
+.calday:focus-visible, .calnav:focus-visible, .caltitle:focus-visible, .calmon:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.calmonths { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0; }
+.calmon { min-height: 48px; border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--surface); color: var(--ink); font-size: 1rem; }
+.calmon.sel { background: var(--navy); border-color: var(--navy); color: var(--on-navy); font-weight: 700; }
+.calfoot { display: flex; gap: 8px; margin-top: 12px; }
 .check { display: flex; gap: 10px; align-items: center; margin: 14px 0 0; font-size: .92rem; }
 .check[hidden] { display: none; }
 .check input { width: 22px; height: 22px; accent-color: var(--brand); flex: none; }
@@ -716,6 +741,7 @@ p.lbl { margin-bottom: 6px; }
 </div></nav>
 <div id="toast" role="status"></div>
 <script src="core.js"></script>
+<script src="datepick.js"></script>
 <script src="invest.js"></script>
 <script src="flow.js"></script>
 <script src="invest-ui.js"></script>
